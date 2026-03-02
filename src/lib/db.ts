@@ -27,13 +27,16 @@ export interface Invoice {
   invoiceNo: string;
   customerId: number;
   date: string;
+  dueDate: string;
   items: { name: string; qty: number; rate: number; amount: number }[];
   subtotal: number;
+  previousDue: number;
   gstEnabled: boolean;
   gstPercent: number;
   gstAmount: number;
   roundOff: number;
   total: number;
+  paidAmount: number;
   createdAt: string;
 }
 
@@ -48,6 +51,7 @@ export interface AppSettings {
   defaultGstPercent: number;
   darkMode: boolean;
   language: 'en' | 'hi';
+  logo?: string; // base64 data URL
 }
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -71,6 +75,12 @@ class VyaparDB extends Dexie {
   constructor() {
     super('smartVyaparLedger');
     this.version(1).stores({
+      contacts: '++id, type, name, phone',
+      ledgerEntries: '++id, contactId, date',
+      invoices: '++id, invoiceNo, customerId, date',
+      settings: '++id',
+    });
+    this.version(2).stores({
       contacts: '++id, type, name, phone',
       ledgerEntries: '++id, contactId, date',
       invoices: '++id, invoiceNo, customerId, date',

@@ -6,7 +6,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Download, Upload, Moon, Globe } from 'lucide-react';
+import { Download, Upload, Moon, Globe, ImagePlus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Settings() {
@@ -51,9 +51,55 @@ export default function Settings() {
     }
   }
 
+  function handleLogoUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 500 * 1024) {
+      toast.error('Logo must be under 500KB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      updateSettings({ logo: reader.result as string });
+      toast.success('Logo uploaded!');
+    };
+    reader.readAsDataURL(file);
+  }
+
   return (
     <div className="p-4 space-y-4 animate-fade-in">
       <h2 className="text-xl font-bold text-foreground">{t('settings', lang)}</h2>
+
+      {/* Logo Upload */}
+      <Card className="shadow-sm">
+        <CardContent className="p-4 space-y-3">
+          <Label>{t('logo', lang)}</Label>
+          <div className="flex items-center gap-4">
+            {settings.logo ? (
+              <div className="relative">
+                <img src={settings.logo} alt="Logo" className="h-16 w-16 object-contain rounded-lg border border-border" />
+                <button
+                  onClick={() => updateSettings({ logo: undefined })}
+                  className="absolute -top-2 -right-2 bg-destructive text-destructive-foreground rounded-full p-0.5"
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              </div>
+            ) : (
+              <div className="h-16 w-16 rounded-lg border-2 border-dashed border-border flex items-center justify-center">
+                <ImagePlus className="h-6 w-6 text-muted-foreground" />
+              </div>
+            )}
+            <div>
+              <Button variant="outline" size="sm" onClick={() => document.getElementById('logo-input')?.click()}>
+                <Upload className="h-3 w-3 mr-1" />{settings.logo ? t('uploadLogo', lang) : t('uploadLogo', lang)}
+              </Button>
+              <input id="logo-input" type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
+              <p className="text-[10px] text-muted-foreground mt-1">PNG/JPG, max 500KB</p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
       <Card className="shadow-sm">
         <CardContent className="p-4 space-y-4">
@@ -105,20 +151,8 @@ export default function Settings() {
               <Label>{t('language', lang)}</Label>
             </div>
             <div className="flex gap-2">
-              <Button
-                variant={lang === 'en' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => updateSettings({ language: 'en' })}
-              >
-                English
-              </Button>
-              <Button
-                variant={lang === 'hi' ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => updateSettings({ language: 'hi' })}
-              >
-                हिंदी
-              </Button>
+              <Button variant={lang === 'en' ? 'default' : 'outline'} size="sm" onClick={() => updateSettings({ language: 'en' })}>English</Button>
+              <Button variant={lang === 'hi' ? 'default' : 'outline'} size="sm" onClick={() => updateSettings({ language: 'hi' })}>हिंदी</Button>
             </div>
           </div>
         </CardContent>
