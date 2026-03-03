@@ -24,7 +24,11 @@ export default function Settings() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `vyapar_backup_${new Date().toISOString().split('T')[0]}.json`;
+    const now = new Date();
+    const dd = String(now.getDate()).padStart(2, '0');
+    const mm = String(now.getMonth() + 1).padStart(2, '0');
+    const yyyy = now.getFullYear();
+    a.download = `smartvyapar-backup-${dd}-${mm}-${yyyy}.json`;
     a.click();
     URL.revokeObjectURL(url);
     toast.success('Backup downloaded!');
@@ -33,6 +37,7 @@ export default function Settings() {
   async function handleRestore(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
+    if (!window.confirm(t('restoreConfirm', lang))) return;
     try {
       const text = await file.text();
       const data = JSON.parse(text);

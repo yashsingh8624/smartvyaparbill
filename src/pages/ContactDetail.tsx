@@ -4,7 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getNextRefNo } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
-import { generateTodayBillPDF, generateFullLedgerPDF, sendWhatsAppReminder } from '@/lib/pdf';
+import { generateFullLedgerPDF, sendWhatsAppReminder } from '@/lib/pdf';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -121,10 +121,7 @@ export default function ContactDetail() {
         <Button variant="credit" size="sm" onClick={() => setShowCredit(true)}>
           <Wallet className="h-4 w-4 mr-1" />{t('addPayment', lang)}
         </Button>
-        <Button variant="outline" size="sm" onClick={() => generateTodayBillPDF(settings, contact, entries)}>
-          <FileText className="h-4 w-4 mr-1" />{t('todayBill', lang)}
-        </Button>
-        <Button variant="outline" size="sm" onClick={() => generateFullLedgerPDF(settings, contact, entries, contactType)}>
+        <Button variant="outline" size="sm" className="col-span-2" onClick={() => generateFullLedgerPDF(settings, contact, entries, contactType)}>
           <FileText className="h-4 w-4 mr-1" />{t('fullLedger', lang)}
         </Button>
         {contact.phone && (

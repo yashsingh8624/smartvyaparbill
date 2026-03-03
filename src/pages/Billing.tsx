@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Plus, Trash2, Save, Search, FileDown } from 'lucide-react';
+import { Plus, Trash2, Save, Search, FileDown, Printer } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { toast } from 'sonner';
 
@@ -40,6 +40,7 @@ export default function Billing() {
   const [gstEnabled, setGstEnabled] = useState(false);
   const [gstPercent, setGstPercent] = useState(settings.defaultGstPercent);
   const [previousDue, setPreviousDue] = useState(0);
+  const [paidToday, setPaidToday] = useState(0);
   const [lastSavedInvoice, setLastSavedInvoice] = useState<Invoice | null>(null);
 
   const selectedCustomer = customers.find(c => c.id === customerId);
@@ -47,7 +48,6 @@ export default function Billing() {
     c => c.name.toLowerCase().includes(custSearch.toLowerCase()) || c.phone.includes(custSearch)
   );
 
-  // Fetch previous due when customer changes
   const customerEntries = useLiveQuery(
     () => customerId ? db.ledgerEntries.where('contactId').equals(customerId).toArray() : Promise.resolve([]),
     [customerId]
@@ -57,7 +57,7 @@ export default function Billing() {
     if (customerId && customerEntries.length > 0) {
       const totalDebit = customerEntries.reduce((s, e) => s + e.debit, 0);
       const totalCredit = customerEntries.reduce((s, e) => s + e.credit, 0);
-      setPreviousDue(Math.max(0, totalDebit - totalCredit));
+      setPreviousDue(Math.round(Math.max(0, totalDebit - totalCredit) * 100) / 100);
     } else {
       setPreviousDue(0);
     }
@@ -67,7 +67,7 @@ export default function Billing() {
     setItems(prev => {
       const copy = [...prev];
       const item = { ...copy[i], [field]: value };
-      item.amount = item.qty * item.rate;
+      item.amount = Math.round(item.qty * item.rate * 100) / 100;
       copy[i] = item;
       return copy;
     });
@@ -82,11 +82,13 @@ export default function Billing() {
     setItems(prev => prev.filter((_, idx) => idx !== i));
   }
 
-  const subtotal = useMemo(() => items.reduce((s, it) => s + it.amount, 0), [items]);
+  const subtotal = useMemo(() => Math.round(items.reduce((s, it) => s + it.amount, 0) * 100) / 100, [items]);
   const gstAmount = gstEnabled ? Math.round(subtotal * gstPercent / 100 * 100) / 100 : 0;
-  const rawTotal = subtotal + previousDue + gstAmount;
-  const roundOff = Math.round(rawTotal) - rawTotal;
-  const total = Math.round(rawTotal);
+  const rawGrandTotal = Math.round((subtotal + gstAmount) * 100) / 100;
+  const roundOff = Math.round((Math.round(rawGrandTotal) - rawGrandTotal) * 100) / 100;
+  const grandTotal = Math.round(rawGrandTotal);
+  const finalPayable = Math.round((grandTotal + previousDue) * 100) / 100;
+  const remainingDue = Math.round((finalPayable - paidToday) * 100) / 100;
 
   async function saveInvoice() {
     if (!customerId) { toast.error('Please select a customer'); return; }
@@ -95,39 +97,36 @@ export default function Billing() {
     const invoiceNo = await getNextInvoiceNo(settings.invoicePrefix);
 
     const invoice: Omit<Invoice, 'id'> = {
-      invoiceNo,
-      customerId,
-      date,
-      dueDate,
+      invoiceNo, customerId, date, dueDate,
       items: items.filter(it => it.amount > 0),
-      subtotal,
-      previousDue,
-      gstEnabled,
-      gstPercent,
-      gstAmount,
-      roundOff: Math.round(roundOff * 100) / 100,
-      total,
-      paidAmount: 0,
+      subtotal, previousDue, gstEnabled, gstPercent, gstAmount,
+      roundOff, total: finalPayable,
+      paidAmount: Math.round(paidToday * 100) / 100,
       createdAt: new Date().toISOString(),
     };
 
     const id = await db.invoices.add(invoice as Invoice);
 
-    // Add debit entry to customer ledger (only for new items, not previous due)
-    const invoiceAmount = subtotal + gstAmount + Math.round(roundOff * 100) / 100;
+    // Add debit entry for invoice amount (not previous due)
     await db.ledgerEntries.add({
-      contactId: customerId,
-      date,
-      refNo: invoiceNo,
+      contactId: customerId, date, refNo: invoiceNo,
       description: `Invoice ${invoiceNo}`,
-      debit: Math.round(invoiceAmount),
-      credit: 0,
+      debit: grandTotal, credit: 0,
       createdAt: new Date().toISOString(),
     });
 
+    // Add credit entry if paid today > 0
+    if (paidToday > 0) {
+      await db.ledgerEntries.add({
+        contactId: customerId, date, refNo: `${invoiceNo}-PAY`,
+        description: `Payment against ${invoiceNo}`,
+        debit: 0, credit: Math.round(paidToday * 100) / 100,
+        mode: 'Cash', createdAt: new Date().toISOString(),
+      });
+    }
+
     const savedInvoice = await db.invoices.get(id);
     setLastSavedInvoice(savedInvoice || null);
-
     toast.success(`Invoice ${invoiceNo} saved!`);
   }
 
@@ -136,9 +135,15 @@ export default function Billing() {
     generateInvoicePDF(settings, selectedCustomer, lastSavedInvoice);
   }
 
+  function printPDF() {
+    if (!lastSavedInvoice || !selectedCustomer) return;
+    generateInvoicePDF(settings, selectedCustomer, lastSavedInvoice, true);
+  }
+
   function resetForm() {
     setItems([{ name: '', qty: 1, rate: 0, amount: 0 }]);
     setCustomerId(null);
+    setPaidToday(0);
     setLastSavedInvoice(null);
   }
 
@@ -148,7 +153,6 @@ export default function Billing() {
 
       <Card className="shadow-sm">
         <CardContent className="p-4 space-y-4">
-          {/* Date, Due Date & Customer */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label>{t('date', lang)}</Label>
@@ -171,33 +175,22 @@ export default function Billing() {
               <PopoverContent className="p-2 w-64">
                 <div className="relative mb-2">
                   <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-muted-foreground" />
-                  <Input
-                    placeholder={t('search', lang)}
-                    value={custSearch}
-                    onChange={e => setCustSearch(e.target.value)}
-                    className="pl-7 h-8 text-sm"
-                  />
+                  <Input placeholder={t('search', lang)} value={custSearch} onChange={e => setCustSearch(e.target.value)} className="pl-7 h-8 text-sm" />
                 </div>
                 <div className="max-h-40 overflow-y-auto space-y-1">
                   {filteredCustomers.map(c => (
-                    <button
-                      key={c.id}
-                      className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted transition-colors"
-                      onClick={() => { setCustomerId(c.id!); setCustOpen(false); setCustSearch(''); }}
-                    >
+                    <button key={c.id} className="w-full text-left px-2 py-1.5 text-sm rounded hover:bg-muted transition-colors"
+                      onClick={() => { setCustomerId(c.id!); setCustOpen(false); setCustSearch(''); }}>
                       <span className="font-medium">{c.name}</span>
                       <span className="text-xs text-muted-foreground ml-2">{c.phone}</span>
                     </button>
                   ))}
-                  {filteredCustomers.length === 0 && (
-                    <p className="text-xs text-muted-foreground p-2">{t('noContacts', lang)}</p>
-                  )}
+                  {filteredCustomers.length === 0 && <p className="text-xs text-muted-foreground p-2">{t('noContacts', lang)}</p>}
                 </div>
               </PopoverContent>
             </Popover>
           </div>
 
-          {/* Previous Due Display */}
           {customerId && previousDue > 0 && (
             <div className="flex justify-between items-center bg-destructive/10 p-3 rounded-lg border border-destructive/20">
               <span className="text-sm font-medium text-debit">{t('previousBalance', lang)}</span>
@@ -209,9 +202,7 @@ export default function Billing() {
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <Label className="text-sm font-semibold">Items</Label>
-              <Button variant="ghost" size="sm" onClick={addItem}>
-                <Plus className="h-3 w-3 mr-1" />{t('addItem', lang)}
-              </Button>
+              <Button variant="ghost" size="sm" onClick={addItem}><Plus className="h-3 w-3 mr-1" />{t('addItem', lang)}</Button>
             </div>
             {items.map((item, i) => (
               <div key={i} className="grid grid-cols-12 gap-2 items-end">
@@ -246,12 +237,6 @@ export default function Billing() {
               <span className="text-muted-foreground">{t('subtotal', lang)}</span>
               <span className="font-medium">₹{subtotal.toFixed(2)}</span>
             </div>
-            {previousDue > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-debit">{t('previousBalance', lang)}</span>
-                <span className="font-medium text-debit">₹{previousDue.toFixed(2)}</span>
-              </div>
-            )}
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Switch checked={gstEnabled} onCheckedChange={setGstEnabled} />
@@ -274,9 +259,34 @@ export default function Billing() {
               <span className="text-muted-foreground">{t('roundOff', lang)}</span>
               <span>{roundOff >= 0 ? '+' : ''}₹{roundOff.toFixed(2)}</span>
             </div>
-            <div className="flex justify-between text-lg font-bold border-t pt-2">
+            <div className="flex justify-between text-sm font-semibold border-t pt-2">
               <span>{t('grandTotal', lang)}</span>
-              <span>₹{total.toFixed(2)}</span>
+              <span>₹{grandTotal.toFixed(2)}</span>
+            </div>
+            {previousDue > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-debit">{t('previousBalance', lang)}</span>
+                <span className="font-medium text-debit">₹{previousDue.toFixed(2)}</span>
+              </div>
+            )}
+            <div className="flex justify-between text-lg font-bold border-t pt-2">
+              <span>{t('finalPayable', lang)}</span>
+              <span>₹{finalPayable.toFixed(2)}</span>
+            </div>
+
+            {/* Paid Today */}
+            <div className="flex items-center justify-between gap-3 pt-1">
+              <Label className="text-sm font-medium text-credit whitespace-nowrap">{t('paidToday', lang)}</Label>
+              <Input
+                type="number" min={0} max={finalPayable}
+                value={paidToday}
+                onChange={e => setPaidToday(Math.min(Number(e.target.value), finalPayable))}
+                className="w-32 h-9 text-sm text-right"
+              />
+            </div>
+            <div className="flex justify-between text-sm font-bold text-debit">
+              <span>{t('remainingDue', lang)}</span>
+              <span>₹{remainingDue.toFixed(2)}</span>
             </div>
           </div>
 
@@ -286,9 +296,14 @@ export default function Billing() {
             </Button>
           ) : (
             <div className="space-y-2">
-              <Button className="w-full" variant="outline" onClick={downloadPDF}>
-                <FileDown className="h-4 w-4 mr-2" />{t('downloadInvoicePdf', lang)}
-              </Button>
+              <div className="grid grid-cols-2 gap-2">
+                <Button variant="outline" onClick={downloadPDF}>
+                  <FileDown className="h-4 w-4 mr-1" />{t('downloadInvoicePdf', lang)}
+                </Button>
+                <Button variant="outline" onClick={printPDF}>
+                  <Printer className="h-4 w-4 mr-1" />{t('printInvoice', lang)}
+                </Button>
+              </div>
               <Button className="w-full" variant="secondary" onClick={resetForm}>
                 <Plus className="h-4 w-4 mr-2" />New Invoice
               </Button>
