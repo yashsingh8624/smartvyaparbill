@@ -9,6 +9,7 @@ import Dashboard from "@/pages/Dashboard";
 import ContactList from "@/pages/ContactList";
 import ContactDetail from "@/pages/ContactDetail";
 import Billing from "@/pages/Billing";
+import Collection from "@/pages/Collection";
 import Settings from "@/pages/Settings";
 import NotFound from "./pages/NotFound";
 
@@ -29,6 +30,7 @@ const App = () => (
               <Route path="/vendors" element={<ContactList />} />
               <Route path="/vendors/:id" element={<ContactDetail />} />
               <Route path="/billing" element={<Billing />} />
+              <Route path="/collection" element={<Collection />} />
               <Route path="/settings" element={<Settings />} />
             </Route>
             <Route path="*" element={<NotFound />} />

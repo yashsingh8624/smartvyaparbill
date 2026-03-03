@@ -1,5 +1,5 @@
 import { Outlet, NavLink } from 'react-router-dom';
-import { LayoutDashboard, Users, Receipt, Truck, Settings } from 'lucide-react';
+import { LayoutDashboard, Users, Receipt, Truck, Settings, Banknote } from 'lucide-react';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
 
@@ -7,6 +7,7 @@ const tabs = [
   { to: '/', icon: LayoutDashboard, key: 'dashboard' },
   { to: '/customers', icon: Users, key: 'customers' },
   { to: '/billing', icon: Receipt, key: 'billing' },
+  { to: '/collection', icon: Banknote, key: 'collection' },
   { to: '/vendors', icon: Truck, key: 'vendors' },
   { to: '/settings', icon: Settings, key: 'settings' },
 ];

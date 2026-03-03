@@ -2,8 +2,10 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
+import { generateTodaySalesReportPDF } from '@/lib/pdf';
 import { Card, CardContent } from '@/components/ui/card';
-import { IndianRupee, TrendingUp, TrendingDown, ShoppingCart, Wallet, CalendarDays } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { IndianRupee, TrendingUp, TrendingDown, ShoppingCart, Wallet, CalendarDays, FileText } from 'lucide-react';
 
 export default function Dashboard() {
   const { settings } = useApp();
@@ -13,6 +15,7 @@ export default function Dashboard() {
   const customers = useLiveQuery(() => db.contacts.where('type').equals('customer').toArray()) || [];
   const vendors = useLiveQuery(() => db.contacts.where('type').equals('vendor').toArray()) || [];
   const allEntries = useLiveQuery(() => db.ledgerEntries.toArray()) || [];
+  const invoices = useLiveQuery(() => db.invoices.toArray()) || [];
 
   const customerIds = new Set(customers.map(c => c.id!));
   const vendorIds = new Set(vendors.map(v => v.id!));
@@ -29,6 +32,8 @@ export default function Dashboard() {
   const todaySales = todayCustEntries.reduce((s, e) => s + e.debit, 0);
   const todayPayments = todayCustEntries.reduce((s, e) => s + e.credit, 0);
 
+  const todayInvoices = invoices.filter(inv => inv.date === today);
+
   const cards = [
     { label: t('totalCustomerOutstanding', lang), value: totalCustDebit - totalCustCredit, icon: Users2Icon, color: 'text-debit' },
     { label: t('totalVendorPayable', lang), value: totalVendDebit - totalVendCredit, icon: TrendingDown, color: 'text-secondary' },
@@ -41,7 +46,12 @@ export default function Dashboard() {
 
   return (
     <div className="p-4 space-y-4 animate-fade-in">
-      <h2 className="text-xl font-bold text-foreground">{t('dashboard', lang)}</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-xl font-bold text-foreground">{t('dashboard', lang)}</h2>
+        <Button variant="outline" size="sm" onClick={() => generateTodaySalesReportPDF(settings, todayInvoices, customers, todaySales, todayPayments)}>
+          <FileText className="h-4 w-4 mr-1" />{t('todaySalesReport', lang)}
+        </Button>
+      </div>
       <div className="grid grid-cols-2 gap-3">
         {cards.map((c, i) => (
           <Card key={i} className={`${i === 0 ? 'col-span-2' : ''} shadow-sm`}>
