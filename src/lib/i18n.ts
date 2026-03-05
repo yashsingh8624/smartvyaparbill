@@ -100,6 +100,11 @@ const translations: Record<string, Record<string, string>> = {
     paymentHistory: 'Payment History',
     paymentSaved: 'Payment saved!',
     restoreConfirm: 'This will replace all existing data. Continue?',
+    editCustomer: 'Edit Customer',
+    deleteContact: 'Delete Contact',
+    deleteContactConfirm: 'This will delete the contact and all associated transactions. Are you sure?',
+    deleteInvoiceConfirm: 'This will delete the invoice and its ledger entries. Are you sure?',
+    invoiceHistory: 'Invoice History',
   },
   hi: {
     appName: 'स्मार्ट व्यापार खाता',
@@ -202,6 +207,11 @@ const translations: Record<string, Record<string, string>> = {
     paymentHistory: 'भुगतान इतिहास',
     paymentSaved: 'भुगतान सेव हुआ!',
     restoreConfirm: 'यह सभी मौजूदा डेटा को बदल देगा। जारी रखें?',
+    editCustomer: 'संपर्क संपादित करें',
+    deleteContact: 'संपर्क हटाएं',
+    deleteContactConfirm: 'इससे संपर्क और सभी लेन-देन हट जाएंगे। क्या आप सुनिश्चित हैं?',
+    deleteInvoiceConfirm: 'इससे चालान और उसकी खाता प्रविष्टियाँ हट जाएँगी। क्या आप सुनिश्चित हैं?',
+    invoiceHistory: 'चालान इतिहास',
   },
 };
 
