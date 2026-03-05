@@ -41,6 +41,7 @@ export default function Billing() {
   const [gstPercent, setGstPercent] = useState(settings.defaultGstPercent);
   const [previousDue, setPreviousDue] = useState(0);
   const [paidToday, setPaidToday] = useState(0);
+  const [includePreviousDue, setIncludePreviousDue] = useState(true);
   const [lastSavedInvoice, setLastSavedInvoice] = useState<Invoice | null>(null);
 
   const selectedCustomer = customers.find(c => c.id === customerId);
@@ -87,33 +88,35 @@ export default function Billing() {
   const rawGrandTotal = Math.round((subtotal + gstAmount) * 100) / 100;
   const roundOff = Math.round((Math.round(rawGrandTotal) - rawGrandTotal) * 100) / 100;
   const grandTotal = Math.round(rawGrandTotal);
-  const finalPayable = Math.round((grandTotal + previousDue) * 100) / 100;
+  const finalPayable = Math.round((grandTotal + (includePreviousDue ? previousDue : 0)) * 100) / 100;
   const remainingDue = Math.round((finalPayable - paidToday) * 100) / 100;
 
   async function saveInvoice() {
-    if (!customerId) { toast.error('Please select a customer'); return; }
-    if (items.every(it => it.amount === 0)) { toast.error('Add at least one item'); return; }
+     if (!customerId) { toast.error('Please select a customer'); return; }
+     if (items.every(it => it.amount === 0)) { toast.error('Add at least one item'); return; }
 
-    const invoiceNo = await getNextInvoiceNo(settings.invoicePrefix);
+     const invoiceNo = await getNextInvoiceNo(settings.invoicePrefix);
+     const prevDue = includePreviousDue ? previousDue : 0;
 
-    const invoice: Omit<Invoice, 'id'> = {
-      invoiceNo, customerId, date, dueDate,
-      items: items.filter(it => it.amount > 0),
-      subtotal, previousDue, gstEnabled, gstPercent, gstAmount,
-      roundOff, total: finalPayable,
-      paidAmount: Math.round(paidToday * 100) / 100,
-      createdAt: new Date().toISOString(),
-    };
+     const invoice: Omit<Invoice, 'id'> = {
+       invoiceNo, customerId, date, dueDate,
+       items: items.filter(it => it.amount > 0),
+       subtotal, previousDue: prevDue, gstEnabled, gstPercent, gstAmount,
+       roundOff, total: finalPayable,
+       paidAmount: Math.round(paidToday * 100) / 100,
+       createdAt: new Date().toISOString(),
+     };
 
     const id = await db.invoices.add(invoice as Invoice);
 
-    // Add debit entry for invoice amount (not previous due)
-    await db.ledgerEntries.add({
-      contactId: customerId, date, refNo: invoiceNo,
-      description: `Invoice ${invoiceNo}`,
-      debit: grandTotal, credit: 0,
-      createdAt: new Date().toISOString(),
-    });
+     // Add debit entry for only the current invoice amount
+     const debitAmount = Math.round(grandTotal * 100) / 100;
+     await db.ledgerEntries.add({
+       contactId: customerId, date, refNo: invoiceNo,
+       description: `Invoice ${invoiceNo}`,
+       debit: debitAmount, credit: 0,
+       createdAt: new Date().toISOString(),
+     });
 
     // Add credit entry if paid today > 0
     if (paidToday > 0) {
@@ -191,12 +194,17 @@ export default function Billing() {
             </Popover>
           </div>
 
-          {customerId && previousDue > 0 && (
-            <div className="flex justify-between items-center bg-destructive/10 p-3 rounded-lg border border-destructive/20">
-              <span className="text-sm font-medium text-debit">{t('previousBalance', lang)}</span>
-              <span className="text-lg font-bold text-debit">₹{previousDue.toFixed(2)}</span>
-            </div>
-          )}
+           {customerId && (
+             <div className="flex items-center justify-between gap-3 bg-muted p-3 rounded-lg">
+               <div className="flex items-center gap-2 flex-1">
+                 <Switch checked={includePreviousDue} onCheckedChange={setIncludePreviousDue} />
+                 <Label className="text-sm font-medium">{t('includePreviousBalance', lang)}</Label>
+               </div>
+               {previousDue > 0 && (
+                 <span className="text-sm font-semibold text-debit">₹{previousDue.toFixed(2)}</span>
+               )}
+             </div>
+           )}
 
           {/* Items */}
           <div className="space-y-3">
@@ -263,12 +271,12 @@ export default function Billing() {
               <span>{t('grandTotal', lang)}</span>
               <span>₹{grandTotal.toFixed(2)}</span>
             </div>
-            {previousDue > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-debit">{t('previousBalance', lang)}</span>
-                <span className="font-medium text-debit">₹{previousDue.toFixed(2)}</span>
-              </div>
-            )}
+             {includePreviousDue && previousDue > 0 && (
+               <div className="flex justify-between text-sm">
+                 <span className="text-debit">{t('previousBalance', lang)}</span>
+                 <span className="font-medium text-debit">₹{previousDue.toFixed(2)}</span>
+               </div>
+             )}
             <div className="flex justify-between text-lg font-bold border-t pt-2">
               <span>{t('finalPayable', lang)}</span>
               <span>₹{finalPayable.toFixed(2)}</span>
