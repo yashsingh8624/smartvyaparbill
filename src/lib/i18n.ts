@@ -104,8 +104,9 @@ const translations: Record<string, Record<string, string>> = {
     deleteContact: 'Delete Contact',
     deleteContactConfirm: 'This will delete the contact and all associated transactions. Are you sure?',
     deleteInvoiceConfirm: 'This will delete the invoice and its ledger entries. Are you sure?',
-    invoiceHistory: 'Invoice History',
-  },
+     invoiceHistory: 'Invoice History',
+     includePreviousBalance: 'Include Previous Balance',
+   },
   hi: {
     appName: 'स्मार्ट व्यापार खाता',
     dashboard: 'डैशबोर्ड',
@@ -211,8 +212,9 @@ const translations: Record<string, Record<string, string>> = {
     deleteContact: 'संपर्क हटाएं',
     deleteContactConfirm: 'इससे संपर्क और सभी लेन-देन हट जाएंगे। क्या आप सुनिश्चित हैं?',
     deleteInvoiceConfirm: 'इससे चालान और उसकी खाता प्रविष्टियाँ हट जाएँगी। क्या आप सुनिश्चित हैं?',
-    invoiceHistory: 'चालान इतिहास',
-  },
+     invoiceHistory: 'चालान इतिहास',
+     includePreviousBalance: 'पिछला बकाया शामिल करें',
+   },
 };
 
 export function t(key: string, lang: 'en' | 'hi' = 'en'): string {
