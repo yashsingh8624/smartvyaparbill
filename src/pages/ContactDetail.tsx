@@ -10,12 +10,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { ArrowLeft, FileText, MessageCircle, Plus, Wallet } from 'lucide-react';
+import { ArrowLeft, FileText, MessageCircle, Plus, Wallet, Pencil, Trash2 } from 'lucide-react';
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table';
+import { toast } from 'sonner';
 
 export default function ContactDetail() {
   const { id } = useParams<{ id: string }>();
@@ -31,9 +32,16 @@ export default function ContactDetail() {
     () => db.ledgerEntries.where('contactId').equals(Number(id)).sortBy('createdAt'),
     [id]
   ) || [];
+  const invoices = useLiveQuery(
+    () => db.invoices.where('customerId').equals(Number(id)).toArray(),
+    [id]
+  ) || [];
 
   const [showDebit, setShowDebit] = useState(false);
   const [showCredit, setShowCredit] = useState(false);
+  const [showEdit, setShowEdit] = useState(false);
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [showDeleteInvoice, setShowDeleteInvoice] = useState<number | null>(null);
 
   // Debit form
   const [dDate, setDDate] = useState(() => new Date().toISOString().split('T')[0]);
@@ -47,20 +55,25 @@ export default function ContactDetail() {
   const [cMode, setCMode] = useState('Cash');
   const [cNote, setCNote] = useState('');
 
+  // Edit form
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+
   if (!contact) return null;
 
   const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
   const totalCredit = entries.reduce((s, e) => s + e.credit, 0);
-  const balance = totalDebit - totalCredit;
+  const balance = Math.round((totalDebit - totalCredit) * 100) / 100;
 
   let runBal = 0;
   const withBalance = entries.map(e => {
     runBal += e.debit - e.credit;
-    return { ...e, runBal };
+    return { ...e, runBal: Math.round(runBal * 100) / 100 };
   });
 
   async function addDebit() {
-    const amount = dQty * dRate;
+    const amount = Math.round(dQty * dRate * 100) / 100;
     if (amount <= 0) return;
     const prefix = isCustomer ? 'S' : 'P';
     const refNo = await getNextRefNo(contact.id!, prefix);
@@ -77,11 +90,49 @@ export default function ContactDetail() {
     const refNo = await getNextRefNo(contact.id!, 'PAY');
     await db.ledgerEntries.add({
       contactId: contact.id!, date: cDate, refNo,
-      description: `Payment - ${cMode}`, debit: 0, credit: cAmount,
+      description: `Payment - ${cMode}`, debit: 0, credit: Math.round(cAmount * 100) / 100,
       mode: cMode, note: cNote, createdAt: new Date().toISOString(),
     });
     setShowCredit(false);
     setCAmount(0); setCNote('');
+  }
+
+  function openEdit() {
+    setEditName(contact.name);
+    setEditPhone(contact.phone);
+    setEditAddress(contact.address || '');
+    setShowEdit(true);
+  }
+
+  async function saveEdit() {
+    await db.contacts.update(contact.id!, { name: editName, phone: editPhone, address: editAddress });
+    toast.success('Contact updated');
+    setShowEdit(false);
+  }
+
+  async function deleteContact() {
+    await db.ledgerEntries.where('contactId').equals(contact.id!).delete();
+    // Delete associated invoices
+    const invIds = invoices.map(inv => inv.id!);
+    if (invIds.length > 0) await db.invoices.bulkDelete(invIds);
+    await db.contacts.delete(contact.id!);
+    toast.success('Contact deleted');
+    navigate(-1);
+  }
+
+  async function deleteInvoice(invoiceId: number) {
+    const inv = await db.invoices.get(invoiceId);
+    if (!inv) return;
+    // Remove associated ledger entries by refNo
+    const relatedEntries = entries.filter(
+      e => e.refNo === inv.invoiceNo || e.refNo === `${inv.invoiceNo}-PAY`
+    );
+    for (const entry of relatedEntries) {
+      if (entry.id) await db.ledgerEntries.delete(entry.id);
+    }
+    await db.invoices.delete(invoiceId);
+    toast.success(`Invoice ${inv.invoiceNo} deleted`);
+    setShowDeleteInvoice(null);
   }
 
   const statusBadge = balance > 0
@@ -90,9 +141,19 @@ export default function ContactDetail() {
 
   return (
     <div className="p-4 space-y-4 animate-fade-in">
-      <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-primary font-medium">
-        <ArrowLeft className="h-4 w-4" /> {contact.name}
-      </button>
+      <div className="flex items-center justify-between">
+        <button onClick={() => navigate(-1)} className="flex items-center gap-1 text-sm text-primary font-medium">
+          <ArrowLeft className="h-4 w-4" /> {contact.name}
+        </button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="icon" className="h-8 w-8" onClick={openEdit}>
+            <Pencil className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="outline" size="icon" className="h-8 w-8 text-destructive hover:bg-destructive hover:text-destructive-foreground" onClick={() => setShowDeleteConfirm(true)}>
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        </div>
+      </div>
 
       {/* Summary Cards */}
       <div className="grid grid-cols-2 gap-3">
@@ -130,6 +191,46 @@ export default function ContactDetail() {
           </Button>
         )}
       </div>
+
+      {/* Invoice History */}
+      {isCustomer && invoices.length > 0 && (
+        <Card className="shadow-sm">
+          <CardContent className="p-4">
+            <h3 className="text-sm font-semibold mb-3 text-card-foreground">{t('invoiceHistory', lang)}</h3>
+            <div className="overflow-x-auto rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="text-xs">{t('invoiceNo', lang)}</TableHead>
+                    <TableHead className="text-xs">{t('date', lang)}</TableHead>
+                    <TableHead className="text-xs text-right">{t('total', lang)}</TableHead>
+                    <TableHead className="text-xs text-right">{t('paidAmount', lang)}</TableHead>
+                    <TableHead className="text-xs"></TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(inv => (
+                    <TableRow key={inv.id}>
+                      <TableCell className="text-xs font-medium">{inv.invoiceNo}</TableCell>
+                      <TableCell className="text-xs">{inv.date}</TableCell>
+                      <TableCell className="text-xs text-right font-bold">₹{inv.total.toFixed(2)}</TableCell>
+                      <TableCell className="text-xs text-right text-credit">₹{inv.paidAmount.toFixed(2)}</TableCell>
+                      <TableCell className="text-xs text-right">
+                        <Button
+                          variant="ghost" size="icon" className="h-7 w-7 text-destructive"
+                          onClick={() => setShowDeleteInvoice(inv.id!)}
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Ledger Table */}
       {entries.length === 0 ? (
@@ -209,6 +310,49 @@ export default function ContactDetail() {
             <div><Label>{t('note', lang)}</Label><Input value={cNote} onChange={e => setCNote(e.target.value)} /></div>
             <Button className="w-full" variant="credit" onClick={addCredit}>{t('save', lang)}</Button>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Edit Contact Dialog */}
+      <Dialog open={showEdit} onOpenChange={setShowEdit}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('editCustomer', lang)}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div><Label>{t('name', lang)}</Label><Input value={editName} onChange={e => setEditName(e.target.value)} /></div>
+            <div><Label>{t('phone', lang)}</Label><Input value={editPhone} onChange={e => setEditPhone(e.target.value)} /></div>
+            <div><Label>{t('address', lang)}</Label><Input value={editAddress} onChange={e => setEditAddress(e.target.value)} /></div>
+            <Button className="w-full" onClick={saveEdit}>{t('save', lang)}</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Contact Confirmation */}
+      <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('confirm', lang)}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('deleteContactConfirm', lang)}</p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>{t('cancel', lang)}</Button>
+            <Button variant="destructive" onClick={deleteContact}>{t('delete', lang)}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Invoice Confirmation */}
+      <Dialog open={showDeleteInvoice !== null} onOpenChange={() => setShowDeleteInvoice(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t('confirm', lang)}</DialogTitle>
+          </DialogHeader>
+          <p className="text-sm text-muted-foreground">{t('deleteInvoiceConfirm', lang)}</p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setShowDeleteInvoice(null)}>{t('cancel', lang)}</Button>
+            <Button variant="destructive" onClick={() => showDeleteInvoice && deleteInvoice(showDeleteInvoice)}>{t('delete', lang)}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>
