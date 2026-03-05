@@ -46,18 +46,16 @@ export default function Collection() {
     .filter(e => e.contactId === selectedId && e.credit > 0)
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  // Payment history with running remaining balance
-  const selectedAllEntries = allEntries.filter(e => e.contactId === selectedId);
-  const totalDebitSelected = selectedAllEntries.reduce((s, e) => s + e.debit, 0);
-  let remaining = totalDebitSelected;
+  // Payment history with running balance calculated dynamically
+  const selectedAllEntries = allEntries
+    .filter(e => e.contactId === selectedId)
+    .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+  let runningBal = 0;
   const paymentHistory = selectedAllEntries
-    .sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-    .reduce<{ date: string; amount: number; remaining: number; note: string }[]>((acc, e) => {
+    .reduce<{ date: string; amount: number; remaining: number; note: string; type: string }[]>((acc, e) => {
+      runningBal = Math.round((runningBal + e.debit - e.credit) * 100) / 100;
       if (e.credit > 0) {
-        remaining -= e.credit;
-        acc.push({ date: e.date, amount: e.credit, remaining: Math.round(remaining * 100) / 100, note: e.note || '' });
-      } else {
-        remaining = remaining; // debit doesn't reduce
+        acc.push({ date: e.date, amount: e.credit, remaining: Math.max(0, runningBal), note: e.note || '', type: 'credit' });
       }
       return acc;
     }, []).reverse();

@@ -89,20 +89,23 @@ export default function Billing() {
   const roundOff = Math.round((Math.round(rawGrandTotal) - rawGrandTotal) * 100) / 100;
   const grandTotal = Math.round(rawGrandTotal);
   const finalPayable = Math.round((grandTotal + (includePreviousDue ? previousDue : 0)) * 100) / 100;
-  const remainingDue = Math.round((finalPayable - paidToday) * 100) / 100;
+  const remainingDue = Math.max(0, Math.round((finalPayable - paidToday) * 100) / 100);
 
   async function saveInvoice() {
      if (!customerId) { toast.error('Please select a customer'); return; }
-     if (items.every(it => it.amount === 0)) { toast.error('Add at least one item'); return; }
+     const validItems = items.filter(it => it.amount > 0);
+     if (validItems.length === 0) { toast.error('Add at least one item with amount > 0'); return; }
+     if (validItems.some(it => !it.name.trim())) { toast.error('All items must have a name'); return; }
+     if (paidToday < 0) { toast.error('Paid amount cannot be negative'); return; }
 
      const invoiceNo = await getNextInvoiceNo(settings.invoicePrefix);
      const prevDue = includePreviousDue ? previousDue : 0;
 
      const invoice: Omit<Invoice, 'id'> = {
        invoiceNo, customerId, date, dueDate,
-       items: items.filter(it => it.amount > 0),
+       items: validItems,
        subtotal, previousDue: prevDue, gstEnabled, gstPercent, gstAmount,
-       roundOff, total: finalPayable,
+       roundOff, total: grandTotal,
        paidAmount: Math.round(paidToday * 100) / 100,
        createdAt: new Date().toISOString(),
      };
@@ -277,10 +280,10 @@ export default function Billing() {
                  <span className="font-medium text-debit">₹{previousDue.toFixed(2)}</span>
                </div>
              )}
-            <div className="flex justify-between text-lg font-bold border-t pt-2">
-              <span>{t('finalPayable', lang)}</span>
-              <span>₹{finalPayable.toFixed(2)}</span>
-            </div>
+             <div className="flex justify-between text-lg font-bold border-t pt-2">
+               <span>{t('finalPayable', lang)}</span>
+               <span className="text-foreground">₹{finalPayable.toFixed(2)}</span>
+             </div>
 
             {/* Paid Today */}
             <div className="flex items-center justify-between gap-3 pt-1">

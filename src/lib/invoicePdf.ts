@@ -120,17 +120,25 @@ export function generateInvoicePDF(
   }
 
   y += 2; doc.setDrawColor(...black); doc.setLineWidth(0.6); doc.line(margin, y, rightEdge, y); y += 8;
+  // Grand Total = bill only (without previous due)
   doc.setFontSize(13); doc.setFont('helvetica', 'bold'); doc.setTextColor(...black);
-  doc.text('Total Due', margin, y); doc.text(`₹${invoice.total.toFixed(2)}`, amountX, y, { align: 'right' });
+  doc.text('Grand Total', margin, y); doc.text(`₹${invoice.total.toFixed(2)}`, amountX, y, { align: 'right' });
   y += 3; doc.setDrawColor(...accent); doc.setLineWidth(0.8); doc.line(margin, y, rightEdge, y);
+
+  // Final payable = grand total + previous due
+  const finalPayable = Math.round((invoice.total + invoice.previousDue) * 100) / 100;
+  if (invoice.previousDue > 0) {
+    y += 8; doc.setFontSize(10); doc.setFont('helvetica', 'bold'); doc.setTextColor(...black);
+    doc.text('Final Payable', margin, y); doc.text(`₹${finalPayable.toFixed(2)}`, amountX, y, { align: 'right' });
+  }
 
   if (invoice.paidAmount > 0) {
     y += 8; doc.setFontSize(9);
     doc.setFont('helvetica', 'normal'); doc.setTextColor(22, 130, 80);
     doc.text('Paid Amount', margin, y); doc.text(`₹${invoice.paidAmount.toFixed(2)}`, amountX, y, { align: 'right' }); y += 6;
-    const remaining = invoice.total - invoice.paidAmount;
+    const remaining = Math.round((finalPayable - invoice.paidAmount) * 100) / 100;
     doc.setFont('helvetica', 'bold'); doc.setTextColor(200, 50, 50);
-    doc.text('Remaining Balance', margin, y); doc.text(`₹${remaining.toFixed(2)}`, amountX, y, { align: 'right' });
+    doc.text('Remaining Balance', margin, y); doc.text(`₹${Math.max(0, remaining).toFixed(2)}`, amountX, y, { align: 'right' });
   }
 
   // Footer

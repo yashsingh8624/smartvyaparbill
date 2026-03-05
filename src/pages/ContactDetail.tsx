@@ -74,7 +74,8 @@ export default function ContactDetail() {
 
   async function addDebit() {
     const amount = Math.round(dQty * dRate * 100) / 100;
-    if (amount <= 0) return;
+    if (amount <= 0) { toast.error('Amount must be greater than 0'); return; }
+    if (dQty <= 0 || dRate <= 0) { toast.error('Quantity and rate must be positive'); return; }
     const prefix = isCustomer ? 'S' : 'P';
     const refNo = await getNextRefNo(contact.id!, prefix);
     await db.ledgerEntries.add({
@@ -86,7 +87,8 @@ export default function ContactDetail() {
   }
 
   async function addCredit() {
-    if (cAmount <= 0 || cAmount > balance) return;
+    if (cAmount <= 0) { toast.error('Amount must be greater than 0'); return; }
+    if (cAmount > balance) { toast.error('Amount exceeds outstanding balance'); return; }
     const refNo = await getNextRefNo(contact.id!, 'PAY');
     await db.ledgerEntries.add({
       contactId: contact.id!, date: cDate, refNo,
@@ -214,6 +216,7 @@ export default function ContactDetail() {
                       <TableCell className="text-xs font-medium">{inv.invoiceNo}</TableCell>
                       <TableCell className="text-xs">{inv.date}</TableCell>
                       <TableCell className="text-xs text-right font-bold">₹{inv.total.toFixed(2)}</TableCell>
+                      
                       <TableCell className="text-xs text-right text-credit">₹{inv.paidAmount.toFixed(2)}</TableCell>
                       <TableCell className="text-xs text-right">
                         <Button
