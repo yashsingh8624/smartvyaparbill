@@ -1,9 +1,10 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getNextInvoiceNo } from '@/lib/db';
 import type { Invoice } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
+import { formatINR } from '@/lib/utils';
 import { generateInvoicePDF } from '@/lib/invoicePdf';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -44,6 +45,44 @@ export default function Billing() {
   const [includePreviousDue, setIncludePreviousDue] = useState(true);
   const [lastSavedInvoice, setLastSavedInvoice] = useState<Invoice | null>(null);
 
+  // Refs for keyboard navigation
+  const itemRefs = useRef<Map<string, HTMLInputElement>>(new Map());
+
+  const setRef = useCallback((key: string, el: HTMLInputElement | null) => {
+    if (el) itemRefs.current.set(key, el);
+    else itemRefs.current.delete(key);
+  }, []);
+
+  const focusField = useCallback((row: number, field: string) => {
+    setTimeout(() => {
+      const el = itemRefs.current.get(`${row}-${field}`);
+      if (el) { el.focus(); el.select(); }
+    }, 50);
+  }, []);
+
+  const handleItemKeyDown = useCallback((e: React.KeyboardEvent, row: number, field: string) => {
+    if (e.key !== 'Enter' && e.key !== 'Tab') return;
+    // Don't override Tab default if shift is held
+    if (e.key === 'Tab' && e.shiftKey) return;
+    
+    e.preventDefault();
+    const fields = ['name', 'qty', 'rate'];
+    const idx = fields.indexOf(field);
+    
+    if (idx < fields.length - 1) {
+      // Move to next field in same row
+      focusField(row, fields[idx + 1]);
+    } else {
+      // Last field (rate) - auto-add new row if this is last item
+      if (row === items.length - 1) {
+        setItems(prev => [...prev, { name: '', qty: 1, rate: 0, amount: 0 }]);
+        setTimeout(() => focusField(row + 1, 'name'), 100);
+      } else {
+        focusField(row + 1, 'name');
+      }
+    }
+  }, [items.length, focusField]);
+
   const selectedCustomer = customers.find(c => c.id === customerId);
   const filteredCustomers = customers.filter(
     c => c.name.toLowerCase().includes(custSearch.toLowerCase()) || c.phone.includes(custSearch)
@@ -76,6 +115,7 @@ export default function Billing() {
 
   function addItem() {
     setItems(prev => [...prev, { name: '', qty: 1, rate: 0, amount: 0 }]);
+    setTimeout(() => focusField(items.length, 'name'), 100);
   }
 
   function removeItem(i: number) {
@@ -92,36 +132,34 @@ export default function Billing() {
   const remainingDue = Math.max(0, Math.round((finalPayable - paidToday) * 100) / 100);
 
   async function saveInvoice() {
-     if (!customerId) { toast.error('Please select a customer'); return; }
-     const validItems = items.filter(it => it.amount > 0);
-     if (validItems.length === 0) { toast.error('Add at least one item with amount > 0'); return; }
-     if (validItems.some(it => !it.name.trim())) { toast.error('All items must have a name'); return; }
-     if (paidToday < 0) { toast.error('Paid amount cannot be negative'); return; }
+    if (!customerId) { toast.error('Please select a customer'); return; }
+    const validItems = items.filter(it => it.amount > 0);
+    if (validItems.length === 0) { toast.error('Add at least one item with amount > 0'); return; }
+    if (validItems.some(it => !it.name.trim())) { toast.error('All items must have a name'); return; }
+    if (paidToday < 0) { toast.error('Paid amount cannot be negative'); return; }
 
-     const invoiceNo = await getNextInvoiceNo(settings.invoicePrefix);
-     const prevDue = includePreviousDue ? previousDue : 0;
+    const invoiceNo = await getNextInvoiceNo(settings.invoicePrefix);
+    const prevDue = includePreviousDue ? previousDue : 0;
 
-     const invoice: Omit<Invoice, 'id'> = {
-       invoiceNo, customerId, date, dueDate,
-       items: validItems,
-       subtotal, previousDue: prevDue, gstEnabled, gstPercent, gstAmount,
-       roundOff, total: grandTotal,
-       paidAmount: Math.round(paidToday * 100) / 100,
-       createdAt: new Date().toISOString(),
-     };
+    const invoice: Omit<Invoice, 'id'> = {
+      invoiceNo, customerId, date, dueDate,
+      items: validItems,
+      subtotal, previousDue: prevDue, gstEnabled, gstPercent, gstAmount,
+      roundOff, total: grandTotal,
+      paidAmount: Math.round(paidToday * 100) / 100,
+      createdAt: new Date().toISOString(),
+    };
 
     const id = await db.invoices.add(invoice as Invoice);
 
-     // Add debit entry for only the current invoice amount
-     const debitAmount = Math.round(grandTotal * 100) / 100;
-     await db.ledgerEntries.add({
-       contactId: customerId, date, refNo: invoiceNo,
-       description: `Invoice ${invoiceNo}`,
-       debit: debitAmount, credit: 0,
-       createdAt: new Date().toISOString(),
-     });
+    // Debit for current invoice only
+    await db.ledgerEntries.add({
+      contactId: customerId, date, refNo: invoiceNo,
+      description: `Invoice ${invoiceNo}`,
+      debit: Math.round(grandTotal * 100) / 100, credit: 0,
+      createdAt: new Date().toISOString(),
+    });
 
-    // Add credit entry if paid today > 0
     if (paidToday > 0) {
       await db.ledgerEntries.add({
         contactId: customerId, date, refNo: `${invoiceNo}-PAY`,
@@ -159,22 +197,24 @@ export default function Billing() {
 
       <Card className="shadow-sm">
         <CardContent className="p-4 space-y-4">
+          {/* Date & Due Date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label>{t('date', lang)}</Label>
-              <Input type="date" value={date} onChange={e => setDate(e.target.value)} />
+              <Label className="text-xs">{t('date', lang)}</Label>
+              <Input type="date" value={date} onChange={e => setDate(e.target.value)} className="h-9" />
             </div>
             <div>
-              <Label>{t('dueDate', lang)}</Label>
-              <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} />
+              <Label className="text-xs">{t('dueDate', lang)}</Label>
+              <Input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="h-9" />
             </div>
           </div>
 
+          {/* Customer Select */}
           <div>
-            <Label>{t('selectCustomer', lang)}</Label>
+            <Label className="text-xs">{t('selectCustomer', lang)}</Label>
             <Popover open={custOpen} onOpenChange={setCustOpen}>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="w-full justify-start font-normal">
+                <Button variant="outline" className="w-full justify-start font-normal h-9 text-sm">
                   {selectedCustomer ? selectedCustomer.name : t('selectCustomer', lang)}
                 </Button>
               </PopoverTrigger>
@@ -197,44 +237,76 @@ export default function Billing() {
             </Popover>
           </div>
 
-           {customerId && (
-             <div className="flex items-center justify-between gap-3 bg-muted p-3 rounded-lg">
-               <div className="flex items-center gap-2 flex-1">
-                 <Switch checked={includePreviousDue} onCheckedChange={setIncludePreviousDue} />
-                 <Label className="text-sm font-medium">{t('includePreviousBalance', lang)}</Label>
-               </div>
-               {previousDue > 0 && (
-                 <span className="text-sm font-semibold text-debit">₹{previousDue.toFixed(2)}</span>
-               )}
-             </div>
-           )}
+          {/* Previous Balance Toggle */}
+          {customerId && (
+            <div className="flex items-center justify-between gap-3 bg-muted p-3 rounded-lg">
+              <div className="flex items-center gap-2 flex-1">
+                <Switch checked={includePreviousDue} onCheckedChange={setIncludePreviousDue} />
+                <Label className="text-sm font-medium">{t('includePreviousBalance', lang)}</Label>
+              </div>
+              {previousDue > 0 && (
+                <span className="text-sm font-semibold text-debit">{formatINR(previousDue)}</span>
+              )}
+            </div>
+          )}
 
-          {/* Items */}
-          <div className="space-y-3">
+          {/* Items - Fast Entry */}
+          <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-sm font-semibold">Items</Label>
-              <Button variant="ghost" size="sm" onClick={addItem}><Plus className="h-3 w-3 mr-1" />{t('addItem', lang)}</Button>
+              <Button variant="ghost" size="sm" onClick={addItem} className="h-7 text-xs">
+                <Plus className="h-3 w-3 mr-1" />{t('addItem', lang)}
+              </Button>
             </div>
+
+            {/* Column Headers */}
+            <div className="grid grid-cols-12 gap-1.5 px-1">
+              <span className="col-span-4 text-[10px] font-medium text-muted-foreground">{t('itemName', lang)}</span>
+              <span className="col-span-2 text-[10px] font-medium text-muted-foreground text-center">{t('quantity', lang)}</span>
+              <span className="col-span-2 text-[10px] font-medium text-muted-foreground text-center">{t('rate', lang)}</span>
+              <span className="col-span-3 text-[10px] font-medium text-muted-foreground text-right">{t('amount', lang)}</span>
+              <span className="col-span-1"></span>
+            </div>
+
             {items.map((item, i) => (
-              <div key={i} className="grid grid-cols-12 gap-2 items-end">
+              <div key={i} className="grid grid-cols-12 gap-1.5 items-center">
                 <div className="col-span-4">
-                  {i === 0 && <Label className="text-[10px]">{t('itemName', lang)}</Label>}
-                  <Input value={item.name} onChange={e => updateItem(i, 'name', e.target.value)} className="h-9 text-sm" />
+                  <Input
+                    ref={el => setRef(`${i}-name`, el)}
+                    value={item.name}
+                    onChange={e => updateItem(i, 'name', e.target.value)}
+                    onKeyDown={e => handleItemKeyDown(e, i, 'name')}
+                    placeholder="Item"
+                    className="h-9 text-sm"
+                  />
                 </div>
                 <div className="col-span-2">
-                  {i === 0 && <Label className="text-[10px]">{t('quantity', lang)}</Label>}
-                  <Input type="number" min={1} value={item.qty} onChange={e => updateItem(i, 'qty', Number(e.target.value))} className="h-9 text-sm" />
+                  <Input
+                    ref={el => setRef(`${i}-qty`, el)}
+                    type="number" min={1}
+                    value={item.qty}
+                    onChange={e => updateItem(i, 'qty', Number(e.target.value))}
+                    onKeyDown={e => handleItemKeyDown(e, i, 'qty')}
+                    className="h-9 text-sm text-center"
+                  />
                 </div>
                 <div className="col-span-2">
-                  {i === 0 && <Label className="text-[10px]">{t('rate', lang)}</Label>}
-                  <Input type="number" min={0} value={item.rate} onChange={e => updateItem(i, 'rate', Number(e.target.value))} className="h-9 text-sm" />
+                  <Input
+                    ref={el => setRef(`${i}-rate`, el)}
+                    type="number" min={0}
+                    value={item.rate}
+                    onChange={e => updateItem(i, 'rate', Number(e.target.value))}
+                    onKeyDown={e => handleItemKeyDown(e, i, 'rate')}
+                    className="h-9 text-sm text-right"
+                  />
                 </div>
                 <div className="col-span-3">
-                  {i === 0 && <Label className="text-[10px]">{t('amount', lang)}</Label>}
-                  <Input readOnly value={`₹${item.amount.toFixed(2)}`} className="h-9 text-sm bg-muted" />
+                  <div className="h-9 flex items-center justify-end px-2 bg-muted rounded-md text-sm font-medium">
+                    {formatINR(item.amount)}
+                  </div>
                 </div>
-                <div className="col-span-1">
-                  <Button variant="ghost" size="icon" className="h-9 w-9" onClick={() => removeItem(i)} disabled={items.length <= 1}>
+                <div className="col-span-1 flex justify-center">
+                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeItem(i)} disabled={items.length <= 1}>
                     <Trash2 className="h-3 w-3 text-debit" />
                   </Button>
                 </div>
@@ -243,11 +315,12 @@ export default function Billing() {
           </div>
 
           {/* Calculations */}
-          <div className="border-t pt-3 space-y-2">
+          <div className="border-t pt-3 space-y-1.5">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t('subtotal', lang)}</span>
-              <span className="font-medium">₹{subtotal.toFixed(2)}</span>
+              <span className="font-medium">{formatINR(subtotal)}</span>
             </div>
+
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <Switch checked={gstEnabled} onCheckedChange={setGstEnabled} />
@@ -255,35 +328,40 @@ export default function Billing() {
               </div>
               {gstEnabled && (
                 <div className="flex items-center gap-1">
-                  <Input type="number" min={0} max={100} value={gstPercent} onChange={e => setGstPercent(Number(e.target.value))} className="w-16 h-8 text-sm" />
+                  <Input type="number" min={0} max={100} value={gstPercent} onChange={e => setGstPercent(Number(e.target.value))} className="w-16 h-8 text-sm text-right" />
                   <span className="text-sm">%</span>
                 </div>
               )}
             </div>
+
             {gstEnabled && (
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">{t('gstAmount', lang)}</span>
-                <span>₹{gstAmount.toFixed(2)}</span>
+                <span>{formatINR(gstAmount)}</span>
               </div>
             )}
+
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t('roundOff', lang)}</span>
-              <span>{roundOff >= 0 ? '+' : ''}₹{roundOff.toFixed(2)}</span>
+              <span>{roundOff >= 0 ? '+' : ''}{formatINR(roundOff)}</span>
             </div>
+
             <div className="flex justify-between text-sm font-semibold border-t pt-2">
               <span>{t('grandTotal', lang)}</span>
-              <span>₹{grandTotal.toFixed(2)}</span>
+              <span>{formatINR(grandTotal)}</span>
             </div>
-             {includePreviousDue && previousDue > 0 && (
-               <div className="flex justify-between text-sm">
-                 <span className="text-debit">{t('previousBalance', lang)}</span>
-                 <span className="font-medium text-debit">₹{previousDue.toFixed(2)}</span>
-               </div>
-             )}
-             <div className="flex justify-between text-lg font-bold border-t pt-2">
-               <span>{t('finalPayable', lang)}</span>
-               <span className="text-foreground">₹{finalPayable.toFixed(2)}</span>
-             </div>
+
+            {includePreviousDue && previousDue > 0 && (
+              <div className="flex justify-between text-sm">
+                <span className="text-debit">{t('previousBalance', lang)}</span>
+                <span className="font-medium text-debit">{formatINR(previousDue)}</span>
+              </div>
+            )}
+
+            <div className="flex justify-between text-base font-bold border-t pt-2">
+              <span>{t('finalPayable', lang)}</span>
+              <span className="text-foreground">{formatINR(finalPayable)}</span>
+            </div>
 
             {/* Paid Today */}
             <div className="flex items-center justify-between gap-3 pt-1">
@@ -295,12 +373,14 @@ export default function Billing() {
                 className="w-32 h-9 text-sm text-right"
               />
             </div>
+
             <div className="flex justify-between text-sm font-bold text-debit">
               <span>{t('remainingDue', lang)}</span>
-              <span>₹{remainingDue.toFixed(2)}</span>
+              <span>{formatINR(remainingDue)}</span>
             </div>
           </div>
 
+          {/* Actions */}
           {!lastSavedInvoice ? (
             <Button className="w-full" onClick={saveInvoice}>
               <Save className="h-4 w-4 mr-2" />{t('saveInvoice', lang)}

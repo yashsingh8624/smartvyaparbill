@@ -2,6 +2,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
+import { formatINR } from '@/lib/utils';
 import { generateTodaySalesReportPDF } from '@/lib/pdf';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -59,7 +60,7 @@ export default function Dashboard() {
               <c.icon className={`h-8 w-8 ${c.color} flex-shrink-0`} />
               <div className="min-w-0">
                 <p className="text-xs text-muted-foreground truncate">{c.label}</p>
-                <p className="text-lg font-bold text-card-foreground">₹{c.value.toFixed(2)}</p>
+                <p className="text-lg font-bold text-card-foreground">{formatINR(c.value)}</p>
               </div>
             </CardContent>
           </Card>

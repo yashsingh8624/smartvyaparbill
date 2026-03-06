@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, type Contact } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
+import { formatINR } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -46,11 +47,8 @@ export default function ContactList() {
   async function handleAdd() {
     if (!name.trim()) return;
     const id = await db.contacts.add({
-      name: name.trim(),
-      phone: phone.trim(),
-      address: address.trim(),
-      type: contactType,
-      createdAt: new Date().toISOString(),
+      name: name.trim(), phone: phone.trim(), address: address.trim(),
+      type: contactType, createdAt: new Date().toISOString(),
     });
     setShowAdd(false);
     setName(''); setPhone(''); setAddress('');
@@ -72,12 +70,7 @@ export default function ContactList() {
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={t('search', lang)}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-9"
-        />
+        <Input placeholder={t('search', lang)} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
 
       {filtered.length === 0 && (
@@ -88,11 +81,7 @@ export default function ContactList() {
         {filtered.map(c => {
           const bal = getBalance(c.id!);
           return (
-            <Card
-              key={c.id}
-              className="cursor-pointer hover:shadow-md transition-shadow"
-              onClick={() => navigate(`/${contactType}s/${c.id}`)}
-            >
+            <Card key={c.id} className="cursor-pointer hover:shadow-md transition-shadow" onClick={() => navigate(`/${contactType}s/${c.id}`)}>
               <CardContent className="flex items-center justify-between p-4">
                 <div className="min-w-0">
                   <p className="font-semibold text-card-foreground truncate">{c.name}</p>
@@ -100,7 +89,7 @@ export default function ContactList() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <div className="text-right">
-                    <p className="font-bold text-sm text-card-foreground">₹{bal.toFixed(2)}</p>
+                    <p className="font-bold text-sm text-card-foreground">{formatINR(bal)}</p>
                     <Badge variant={bal > 0 ? 'destructive' : 'default'} className={`text-[10px] ${bal === 0 ? 'bg-credit text-credit-foreground' : ''}`}>
                       {bal > 0
                         ? (isCustomer ? t('due', lang) : t('payable', lang))
