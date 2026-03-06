@@ -3,6 +3,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getNextRefNo } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
+import { formatINR } from '@/lib/utils';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -28,7 +29,6 @@ export default function Collection() {
   const [payNote, setPayNote] = useState('');
   const [search, setSearch] = useState('');
 
-  // Calculate dues per customer
   const customerDues = customers.map(c => {
     const entries = allEntries.filter(e => e.contactId === c.id);
     const totalDebit = entries.reduce((s, e) => s + e.debit, 0);
@@ -42,20 +42,17 @@ export default function Collection() {
   );
 
   const selectedCustomer = customerDues.find(c => c.id === selectedId);
-  const selectedEntries = allEntries
-    .filter(e => e.contactId === selectedId && e.credit > 0)
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
 
-  // Payment history with running balance calculated dynamically
+  // Payment history with running balance
   const selectedAllEntries = allEntries
     .filter(e => e.contactId === selectedId)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   let runningBal = 0;
   const paymentHistory = selectedAllEntries
-    .reduce<{ date: string; amount: number; remaining: number; note: string; type: string }[]>((acc, e) => {
+    .reduce<{ date: string; amount: number; remaining: number; note: string }[]>((acc, e) => {
       runningBal = Math.round((runningBal + e.debit - e.credit) * 100) / 100;
       if (e.credit > 0) {
-        acc.push({ date: e.date, amount: e.credit, remaining: Math.max(0, runningBal), note: e.note || '', type: 'credit' });
+        acc.push({ date: e.date, amount: e.credit, remaining: Math.max(0, runningBal), note: e.note || '' });
       }
       return acc;
     }, []).reverse();
@@ -69,13 +66,10 @@ export default function Collection() {
     const refNo = await getNextRefNo(selectedId, 'COL');
     await db.ledgerEntries.add({
       contactId: selectedId,
-      date: payDate,
-      refNo,
+      date: payDate, refNo,
       description: `Collection - ${payMode}${payNote ? ` (${payNote})` : ''}`,
-      debit: 0,
-      credit: Math.round(payAmount * 100) / 100,
-      mode: payMode,
-      note: payNote,
+      debit: 0, credit: Math.round(payAmount * 100) / 100,
+      mode: payMode, note: payNote,
       createdAt: new Date().toISOString(),
     });
     toast.success(t('paymentSaved', lang));
@@ -90,12 +84,7 @@ export default function Collection() {
 
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder={t('search', lang)}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="pl-9"
-        />
+        <Input placeholder={t('search', lang)} value={search} onChange={e => setSearch(e.target.value)} className="pl-9" />
       </div>
 
       {filtered.length === 0 ? (
@@ -114,11 +103,9 @@ export default function Collection() {
                   <p className="text-xs text-muted-foreground">{c.phone}</p>
                 </div>
                 <div className="text-right">
-                  <p className="text-lg font-bold text-debit">₹{c.due.toFixed(2)}</p>
+                  <p className="text-lg font-bold text-debit">{formatINR(c.due)}</p>
                   <Button
-                    variant="credit"
-                    size="sm"
-                    className="mt-1"
+                    variant="credit" size="sm" className="mt-1"
                     onClick={e => { e.stopPropagation(); setSelectedId(c.id!); setShowPayment(true); }}
                   >
                     <Wallet className="h-3 w-3 mr-1" />{t('addDailyPayment', lang)}
@@ -150,8 +137,8 @@ export default function Collection() {
                   {paymentHistory.map((p, i) => (
                     <TableRow key={i}>
                       <TableCell className="text-xs">{p.date}</TableCell>
-                      <TableCell className="text-xs text-right text-credit font-medium">₹{p.amount.toFixed(2)}</TableCell>
-                      <TableCell className="text-xs text-right font-bold">₹{p.remaining.toFixed(2)}</TableCell>
+                      <TableCell className="text-xs text-right text-credit font-medium">{formatINR(p.amount)}</TableCell>
+                      <TableCell className="text-xs text-right font-bold">{formatINR(p.remaining)}</TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -161,7 +148,7 @@ export default function Collection() {
         </Card>
       )}
 
-      {/* Add Payment Dialog */}
+      {/* Payment Dialog */}
       <Dialog open={showPayment} onOpenChange={setShowPayment}>
         <DialogContent>
           <DialogHeader>
@@ -171,7 +158,7 @@ export default function Collection() {
             {selectedCustomer && (
               <div className="flex justify-between items-center bg-destructive/10 p-3 rounded-lg border border-destructive/20">
                 <span className="text-sm font-medium text-debit">{t('totalDue', lang)}</span>
-                <span className="text-lg font-bold text-debit">₹{selectedCustomer.due.toFixed(2)}</span>
+                <span className="text-lg font-bold text-debit">{formatINR(selectedCustomer.due)}</span>
               </div>
             )}
             <div><Label>{t('date', lang)}</Label><Input type="date" value={payDate} onChange={e => setPayDate(e.target.value)} /></div>

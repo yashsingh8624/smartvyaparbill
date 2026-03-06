@@ -4,6 +4,7 @@ import { useLiveQuery } from 'dexie-react-hooks';
 import { db, getNextRefNo } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
+import { formatINR } from '@/lib/utils';
 import { generateFullLedgerPDF, sendWhatsAppReminder } from '@/lib/pdf';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -13,9 +14,7 @@ import { Badge } from '@/components/ui/badge';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, FileText, MessageCircle, Plus, Wallet, Pencil, Trash2 } from 'lucide-react';
-import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
-} from '@/components/ui/table';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { toast } from 'sonner';
 
 export default function ContactDetail() {
@@ -43,19 +42,16 @@ export default function ContactDetail() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [showDeleteInvoice, setShowDeleteInvoice] = useState<number | null>(null);
 
-  // Debit form
   const [dDate, setDDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [dDesc, setDDesc] = useState('');
   const [dQty, setDQty] = useState(1);
   const [dRate, setDRate] = useState(0);
 
-  // Credit form
   const [cDate, setCDate] = useState(() => new Date().toISOString().split('T')[0]);
   const [cAmount, setCAmount] = useState(0);
   const [cMode, setCMode] = useState('Cash');
   const [cNote, setCNote] = useState('');
 
-  // Edit form
   const [editName, setEditName] = useState('');
   const [editPhone, setEditPhone] = useState('');
   const [editAddress, setEditAddress] = useState('');
@@ -114,7 +110,6 @@ export default function ContactDetail() {
 
   async function deleteContact() {
     await db.ledgerEntries.where('contactId').equals(contact.id!).delete();
-    // Delete associated invoices
     const invIds = invoices.map(inv => inv.id!);
     if (invIds.length > 0) await db.invoices.bulkDelete(invIds);
     await db.contacts.delete(contact.id!);
@@ -125,7 +120,6 @@ export default function ContactDetail() {
   async function deleteInvoice(invoiceId: number) {
     const inv = await db.invoices.get(invoiceId);
     if (!inv) return;
-    // Remove associated ledger entries by refNo
     const relatedEntries = entries.filter(
       e => e.refNo === inv.invoiceNo || e.refNo === `${inv.invoiceNo}-PAY`
     );
@@ -157,26 +151,26 @@ export default function ContactDetail() {
         </div>
       </div>
 
-      {/* Summary Cards */}
+      {/* Summary */}
       <div className="grid grid-cols-2 gap-3">
         <Card className="shadow-sm"><CardContent className="p-3">
           <p className="text-[10px] text-muted-foreground uppercase">{isCustomer ? t('totalGoodsTaken', lang) : t('totalPurchases', lang)}</p>
-          <p className="text-lg font-bold text-debit">₹{totalDebit.toFixed(2)}</p>
+          <p className="text-lg font-bold text-debit">{formatINR(totalDebit)}</p>
         </CardContent></Card>
         <Card className="shadow-sm"><CardContent className="p-3">
           <p className="text-[10px] text-muted-foreground uppercase">{t('totalPaid', lang)}</p>
-          <p className="text-lg font-bold text-credit">₹{totalCredit.toFixed(2)}</p>
+          <p className="text-lg font-bold text-credit">{formatINR(totalCredit)}</p>
         </CardContent></Card>
         <Card className="shadow-sm"><CardContent className="p-3">
           <p className="text-[10px] text-muted-foreground uppercase">{isCustomer ? t('outstanding', lang) : t('payable', lang)}</p>
-          <p className="text-lg font-bold text-foreground">₹{balance.toFixed(2)}</p>
+          <p className="text-lg font-bold text-foreground">{formatINR(balance)}</p>
         </CardContent></Card>
         <Card className="shadow-sm"><CardContent className="p-3 flex items-center justify-center">
           {statusBadge}
         </CardContent></Card>
       </div>
 
-      {/* Action Buttons */}
+      {/* Actions */}
       <div className="grid grid-cols-2 gap-2">
         <Button variant="debit" size="sm" onClick={() => setShowDebit(true)}>
           <Plus className="h-4 w-4 mr-1" />{isCustomer ? t('addSale', lang) : t('addPurchase', lang)}
@@ -215,14 +209,10 @@ export default function ContactDetail() {
                     <TableRow key={inv.id}>
                       <TableCell className="text-xs font-medium">{inv.invoiceNo}</TableCell>
                       <TableCell className="text-xs">{inv.date}</TableCell>
-                      <TableCell className="text-xs text-right font-bold">₹{inv.total.toFixed(2)}</TableCell>
-                      
-                      <TableCell className="text-xs text-right text-credit">₹{inv.paidAmount.toFixed(2)}</TableCell>
+                      <TableCell className="text-xs text-right font-bold">{formatINR(inv.total)}</TableCell>
+                      <TableCell className="text-xs text-right text-credit">{formatINR(inv.paidAmount)}</TableCell>
                       <TableCell className="text-xs text-right">
-                        <Button
-                          variant="ghost" size="icon" className="h-7 w-7 text-destructive"
-                          onClick={() => setShowDeleteInvoice(inv.id!)}
-                        >
+                        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => setShowDeleteInvoice(inv.id!)}>
                           <Trash2 className="h-3 w-3" />
                         </Button>
                       </TableCell>
@@ -244,7 +234,6 @@ export default function ContactDetail() {
             <TableHeader>
               <TableRow>
                 <TableHead className="text-xs">{t('date', lang)}</TableHead>
-                <TableHead className="text-xs">{t('refNo', lang)}</TableHead>
                 <TableHead className="text-xs">{t('description', lang)}</TableHead>
                 <TableHead className="text-xs text-right text-debit">{t('debit', lang)}</TableHead>
                 <TableHead className="text-xs text-right text-credit">{t('credit', lang)}</TableHead>
@@ -255,11 +244,10 @@ export default function ContactDetail() {
               {withBalance.map(e => (
                 <TableRow key={e.id}>
                   <TableCell className="text-xs whitespace-nowrap">{e.date}</TableCell>
-                  <TableCell className="text-xs">{e.refNo}</TableCell>
                   <TableCell className="text-xs">{e.description}</TableCell>
-                  <TableCell className="text-xs text-right text-debit font-medium">{e.debit > 0 ? `₹${e.debit.toFixed(2)}` : '-'}</TableCell>
-                  <TableCell className="text-xs text-right text-credit font-medium">{e.credit > 0 ? `₹${e.credit.toFixed(2)}` : '-'}</TableCell>
-                  <TableCell className="text-xs text-right font-bold">₹{e.runBal.toFixed(2)}</TableCell>
+                  <TableCell className="text-xs text-right text-debit font-medium">{e.debit > 0 ? formatINR(e.debit) : '-'}</TableCell>
+                  <TableCell className="text-xs text-right text-credit font-medium">{e.credit > 0 ? formatINR(e.credit) : '-'}</TableCell>
+                  <TableCell className="text-xs text-right font-bold">{formatINR(e.runBal)}</TableCell>
                 </TableRow>
               ))}
             </TableBody>
@@ -267,7 +255,7 @@ export default function ContactDetail() {
         </div>
       )}
 
-      {/* Add Debit Dialog */}
+      {/* Dialogs */}
       <Dialog open={showDebit} onOpenChange={setShowDebit}>
         <DialogContent>
           <DialogHeader>
@@ -282,14 +270,13 @@ export default function ContactDetail() {
             </div>
             <div className="flex justify-between items-center bg-muted p-3 rounded-lg">
               <span className="text-sm text-muted-foreground">{t('amount', lang)}</span>
-              <span className="text-lg font-bold text-foreground">₹{(dQty * dRate).toFixed(2)}</span>
+              <span className="text-lg font-bold text-foreground">{formatINR(dQty * dRate)}</span>
             </div>
             <Button className="w-full" variant="debit" onClick={addDebit}>{t('save', lang)}</Button>
           </div>
         </DialogContent>
       </Dialog>
 
-      {/* Add Credit Dialog */}
       <Dialog open={showCredit} onOpenChange={setShowCredit}>
         <DialogContent>
           <DialogHeader>
@@ -297,7 +284,7 @@ export default function ContactDetail() {
           </DialogHeader>
           <div className="space-y-3">
             <div><Label>{t('date', lang)}</Label><Input type="date" value={cDate} onChange={e => setCDate(e.target.value)} /></div>
-            <div><Label>{t('amount', lang)} (max ₹{balance.toFixed(2)})</Label>
+            <div><Label>{t('amount', lang)} (max {formatINR(balance)})</Label>
               <Input type="number" min={0} max={balance} value={cAmount} onChange={e => setCAmount(Number(e.target.value))} />
             </div>
             <div><Label>{t('mode', lang)}</Label>
@@ -316,7 +303,6 @@ export default function ContactDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Edit Contact Dialog */}
       <Dialog open={showEdit} onOpenChange={setShowEdit}>
         <DialogContent>
           <DialogHeader>
@@ -331,12 +317,9 @@ export default function ContactDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Contact Confirmation */}
       <Dialog open={showDeleteConfirm} onOpenChange={setShowDeleteConfirm}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('confirm', lang)}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>{t('confirm', lang)}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">{t('deleteContactConfirm', lang)}</p>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>{t('cancel', lang)}</Button>
@@ -345,12 +328,9 @@ export default function ContactDetail() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Invoice Confirmation */}
       <Dialog open={showDeleteInvoice !== null} onOpenChange={() => setShowDeleteInvoice(null)}>
         <DialogContent>
-          <DialogHeader>
-            <DialogTitle>{t('confirm', lang)}</DialogTitle>
-          </DialogHeader>
+          <DialogHeader><DialogTitle>{t('confirm', lang)}</DialogTitle></DialogHeader>
           <p className="text-sm text-muted-foreground">{t('deleteInvoiceConfirm', lang)}</p>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setShowDeleteInvoice(null)}>{t('cancel', lang)}</Button>
