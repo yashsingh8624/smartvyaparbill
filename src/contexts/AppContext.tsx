@@ -1,5 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { getSettings, saveSettings, type AppSettings } from '@/lib/db';
+import { useAuth } from '@/contexts/AuthContext';
+import { getSupabaseSettings, saveSupabaseSettings } from '@/hooks/useData';
 
 interface AppContextType {
   settings: AppSettings;
@@ -15,17 +17,38 @@ export function useApp() {
   return ctx;
 }
 
+const DEFAULT_SETTINGS: AppSettings = {
+  businessName: 'My Shop', ownerName: '', phone: '', address: '',
+  gstNumber: '', invoicePrefix: 'INV', defaultGstPercent: 18,
+  darkMode: false, language: 'en',
+};
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [settings, setSettings] = useState<AppSettings>({
-    businessName: 'My Shop', ownerName: '', phone: '', address: '',
-    gstNumber: '', invoicePrefix: 'INV', defaultGstPercent: 18,
-    darkMode: false, language: 'en',
-  });
+  const { user } = useAuth();
+  const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
-    getSettings().then(s => { setSettings(s); setReady(true); });
-  }, []);
+    async function load() {
+      if (user) {
+        const s = await getSupabaseSettings();
+        if (s) {
+          setSettings(s);
+        } else {
+          // First login - try loading from Dexie then save to Supabase
+          const local = await getSettings();
+          await saveSupabaseSettings(local);
+          const fresh = await getSupabaseSettings();
+          setSettings(fresh || local);
+        }
+      } else {
+        const s = await getSettings();
+        setSettings(s);
+      }
+      setReady(true);
+    }
+    load();
+  }, [user]);
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', settings.darkMode);
@@ -34,7 +57,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   const updateSettings = (partial: Partial<AppSettings>) => {
     setSettings(prev => {
       const updated = { ...prev, ...partial };
-      saveSettings(updated);
+      if (user) {
+        saveSupabaseSettings(updated);
+      } else {
+        saveSettings(updated);
+      }
       return updated;
     });
   };

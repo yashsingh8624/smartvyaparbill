@@ -1,5 +1,4 @@
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db } from '@/lib/db';
+import { useContacts, useLedgerEntries, useInvoices } from '@/hooks/useData';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
 import { formatINR } from '@/lib/utils';
@@ -13,10 +12,10 @@ export default function Dashboard() {
   const lang = settings.language;
   const today = new Date().toISOString().split('T')[0];
 
-  const customers = useLiveQuery(() => db.contacts.where('type').equals('customer').toArray()) || [];
-  const vendors = useLiveQuery(() => db.contacts.where('type').equals('vendor').toArray()) || [];
-  const allEntries = useLiveQuery(() => db.ledgerEntries.toArray()) || [];
-  const invoices = useLiveQuery(() => db.invoices.toArray()) || [];
+  const customers = useContacts('customer');
+  const vendors = useContacts('vendor');
+  const allEntries = useLedgerEntries();
+  const invoices = useInvoices();
 
   const customerIds = new Set(customers.map(c => c.id!));
   const vendorIds = new Set(vendors.map(v => v.id!));
