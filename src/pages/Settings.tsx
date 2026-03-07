@@ -34,6 +34,52 @@ export default function Settings() {
     toast.success('Backup downloaded!');
   }
 
+  function validateBackupData(data: unknown): data is {
+    contacts?: unknown[];
+    ledgerEntries?: unknown[];
+    invoices?: unknown[];
+    settings?: unknown[];
+  } {
+    if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
+    const d = data as Record<string, unknown>;
+    // All known keys must be arrays if present
+    for (const key of ['contacts', 'ledgerEntries', 'invoices', 'settings']) {
+      if (key in d && !Array.isArray(d[key])) return false;
+    }
+    // Validate contacts
+    if (Array.isArray(d.contacts)) {
+      for (const c of d.contacts as Record<string, unknown>[]) {
+        if (typeof c.name !== 'string' || !c.name.trim()) return false;
+        if (typeof c.type !== 'string' || !['customer', 'vendor'].includes(c.type)) return false;
+      }
+    }
+    // Validate ledger entries
+    if (Array.isArray(d.ledgerEntries)) {
+      for (const e of d.ledgerEntries as Record<string, unknown>[]) {
+        if (typeof e.contactId !== 'number') return false;
+        if (typeof e.debit !== 'number' || e.debit < 0) return false;
+        if (typeof e.credit !== 'number' || e.credit < 0) return false;
+      }
+    }
+    // Validate invoices
+    if (Array.isArray(d.invoices)) {
+      for (const inv of d.invoices as Record<string, unknown>[]) {
+        if (typeof inv.invoiceNo !== 'string') return false;
+        if (typeof inv.customerId !== 'number') return false;
+        if (typeof inv.total !== 'number' || inv.total < 0) return false;
+      }
+    }
+    // Validate settings
+    if (Array.isArray(d.settings)) {
+      for (const s of d.settings as Record<string, unknown>[]) {
+        if (typeof s.businessName !== 'string') return false;
+        if (typeof s.defaultGstPercent === 'number' && (s.defaultGstPercent < 0 || s.defaultGstPercent > 100)) return false;
+        if (s.language !== undefined && !['en', 'hi'].includes(s.language as string)) return false;
+      }
+    }
+    return true;
+  }
+
   async function handleRestore(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -41,6 +87,10 @@ export default function Settings() {
     try {
       const text = await file.text();
       const data = JSON.parse(text);
+      if (!validateBackupData(data)) {
+        toast.error('Invalid or corrupted backup file. Restore aborted.');
+        return;
+      }
       await db.contacts.clear();
       await db.ledgerEntries.clear();
       await db.invoices.clear();
