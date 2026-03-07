@@ -1,25 +1,22 @@
 import { useApp } from '@/contexts/AppContext';
+import { useAuth } from '@/contexts/AuthContext';
 import { t } from '@/lib/i18n';
-import { db } from '@/lib/db';
+import { exportAllData, importAllData } from '@/hooks/useData';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import { Download, Upload, Moon, Globe, ImagePlus, X } from 'lucide-react';
+import { Download, Upload, Moon, Globe, ImagePlus, X, Cloud, HardDrive } from 'lucide-react';
 import { toast } from 'sonner';
 
 export default function Settings() {
   const { settings, updateSettings } = useApp();
+  const { user } = useAuth();
   const lang = settings.language;
 
   async function handleBackup() {
-    const data = {
-      contacts: await db.contacts.toArray(),
-      ledgerEntries: await db.ledgerEntries.toArray(),
-      invoices: await db.invoices.toArray(),
-      settings: await db.settings.toArray(),
-    };
+    const data = await exportAllData();
     const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
@@ -42,18 +39,15 @@ export default function Settings() {
   } {
     if (typeof data !== 'object' || data === null || Array.isArray(data)) return false;
     const d = data as Record<string, unknown>;
-    // All known keys must be arrays if present
     for (const key of ['contacts', 'ledgerEntries', 'invoices', 'settings']) {
       if (key in d && !Array.isArray(d[key])) return false;
     }
-    // Validate contacts
     if (Array.isArray(d.contacts)) {
       for (const c of d.contacts as Record<string, unknown>[]) {
         if (typeof c.name !== 'string' || !c.name.trim()) return false;
         if (typeof c.type !== 'string' || !['customer', 'vendor'].includes(c.type)) return false;
       }
     }
-    // Validate ledger entries
     if (Array.isArray(d.ledgerEntries)) {
       for (const e of d.ledgerEntries as Record<string, unknown>[]) {
         if (typeof e.contactId !== 'number') return false;
@@ -61,7 +55,6 @@ export default function Settings() {
         if (typeof e.credit !== 'number' || e.credit < 0) return false;
       }
     }
-    // Validate invoices
     if (Array.isArray(d.invoices)) {
       for (const inv of d.invoices as Record<string, unknown>[]) {
         if (typeof inv.invoiceNo !== 'string') return false;
@@ -69,7 +62,6 @@ export default function Settings() {
         if (typeof inv.total !== 'number' || inv.total < 0) return false;
       }
     }
-    // Validate settings
     if (Array.isArray(d.settings)) {
       for (const s of d.settings as Record<string, unknown>[]) {
         if (typeof s.businessName !== 'string') return false;
@@ -91,14 +83,7 @@ export default function Settings() {
         toast.error('Invalid or corrupted backup file. Restore aborted.');
         return;
       }
-      await db.contacts.clear();
-      await db.ledgerEntries.clear();
-      await db.invoices.clear();
-      await db.settings.clear();
-      if (data.contacts) await db.contacts.bulkAdd(data.contacts);
-      if (data.ledgerEntries) await db.ledgerEntries.bulkAdd(data.ledgerEntries);
-      if (data.invoices) await db.invoices.bulkAdd(data.invoices);
-      if (data.settings) await db.settings.bulkAdd(data.settings);
+      await importAllData(data);
       toast.success('Data restored! Reloading...');
       setTimeout(() => window.location.reload(), 1000);
     } catch {
@@ -125,6 +110,31 @@ export default function Settings() {
     <div className="p-4 space-y-4 animate-fade-in">
       <h2 className="text-xl font-bold text-foreground">{t('settings', lang)}</h2>
 
+      {/* Connection Status */}
+      <Card className="shadow-sm">
+        <CardContent className="p-4">
+          <div className="flex items-center gap-3">
+            {user ? (
+              <>
+                <Cloud className="h-5 w-5 text-credit" />
+                <div>
+                  <p className="text-sm font-medium text-card-foreground">Connected to Cloud</p>
+                  <p className="text-xs text-muted-foreground">{user.email} — data syncs across devices</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <HardDrive className="h-5 w-5 text-muted-foreground" />
+                <div>
+                  <p className="text-sm font-medium text-card-foreground">Offline Mode</p>
+                  <p className="text-xs text-muted-foreground">Data stored locally on this device only</p>
+                </div>
+              </>
+            )}
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Logo Upload */}
       <Card className="shadow-sm">
         <CardContent className="p-4 space-y-3">
@@ -147,7 +157,7 @@ export default function Settings() {
             )}
             <div>
               <Button variant="outline" size="sm" onClick={() => document.getElementById('logo-input')?.click()}>
-                <Upload className="h-3 w-3 mr-1" />{settings.logo ? t('uploadLogo', lang) : t('uploadLogo', lang)}
+                <Upload className="h-3 w-3 mr-1" />{t('uploadLogo', lang)}
               </Button>
               <input id="logo-input" type="file" accept="image/*" className="hidden" onChange={handleLogoUpload} />
               <p className="text-[10px] text-muted-foreground mt-1">PNG/JPG, max 500KB</p>

@@ -1,6 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getNextInvoiceNo } from '@/lib/db';
+import { useContacts, useLedgerEntries, addInvoice, addLedgerEntry, getNextInvoiceNo, getInvoice } from '@/hooks/useData';
 import type { Invoice } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
@@ -26,7 +25,7 @@ export default function Billing() {
   const { settings } = useApp();
   const lang = settings.language;
 
-  const customers = useLiveQuery(() => db.contacts.where('type').equals('customer').toArray()) || [];
+  const customers = useContacts('customer');
 
   const [customerId, setCustomerId] = useState<number | null>(null);
   const [custSearch, setCustSearch] = useState('');
@@ -45,7 +44,6 @@ export default function Billing() {
   const [includePreviousDue, setIncludePreviousDue] = useState(true);
   const [lastSavedInvoice, setLastSavedInvoice] = useState<Invoice | null>(null);
 
-  // Refs for keyboard navigation
   const itemRefs = useRef<Map<string, HTMLInputElement>>(new Map());
 
   const setRef = useCallback((key: string, el: HTMLInputElement | null) => {
@@ -62,18 +60,13 @@ export default function Billing() {
 
   const handleItemKeyDown = useCallback((e: React.KeyboardEvent, row: number, field: string) => {
     if (e.key !== 'Enter' && e.key !== 'Tab') return;
-    // Don't override Tab default if shift is held
     if (e.key === 'Tab' && e.shiftKey) return;
-    
     e.preventDefault();
     const fields = ['name', 'qty', 'rate'];
     const idx = fields.indexOf(field);
-    
     if (idx < fields.length - 1) {
-      // Move to next field in same row
       focusField(row, fields[idx + 1]);
     } else {
-      // Last field (rate) - auto-add new row if this is last item
       if (row === items.length - 1) {
         setItems(prev => [...prev, { name: '', qty: 1, rate: 0, amount: 0 }]);
         setTimeout(() => focusField(row + 1, 'name'), 100);
@@ -88,10 +81,7 @@ export default function Billing() {
     c => c.name.toLowerCase().includes(custSearch.toLowerCase()) || c.phone.includes(custSearch)
   );
 
-  const customerEntries = useLiveQuery(
-    () => customerId ? db.ledgerEntries.where('contactId').equals(customerId).toArray() : Promise.resolve([]),
-    [customerId]
-  ) || [];
+  const customerEntries = useLedgerEntries(customerId ?? undefined);
 
   useEffect(() => {
     if (customerId && customerEntries.length > 0) {
@@ -113,7 +103,7 @@ export default function Billing() {
     });
   }
 
-  function addItem() {
+  function addItemRow() {
     setItems(prev => [...prev, { name: '', qty: 1, rate: 0, amount: 0 }]);
     setTimeout(() => focusField(items.length, 'name'), 100);
   }
@@ -131,7 +121,7 @@ export default function Billing() {
   const finalPayable = Math.round((grandTotal + (includePreviousDue ? previousDue : 0)) * 100) / 100;
   const remainingDue = Math.max(0, Math.round((finalPayable - paidToday) * 100) / 100);
 
-  async function saveInvoice() {
+  async function saveInvoiceHandler() {
     if (!customerId) { toast.error('Please select a customer'); return; }
     const validItems = items.filter(it => it.amount > 0);
     if (validItems.length === 0) { toast.error('Add at least one item with amount > 0'); return; }
@@ -150,10 +140,9 @@ export default function Billing() {
       createdAt: new Date().toISOString(),
     };
 
-    const id = await db.invoices.add(invoice as Invoice);
+    const id = await addInvoice(invoice);
 
-    // Debit for current invoice only
-    await db.ledgerEntries.add({
+    await addLedgerEntry({
       contactId: customerId, date, refNo: invoiceNo,
       description: `Invoice ${invoiceNo}`,
       debit: Math.round(grandTotal * 100) / 100, credit: 0,
@@ -161,7 +150,7 @@ export default function Billing() {
     });
 
     if (paidToday > 0) {
-      await db.ledgerEntries.add({
+      await addLedgerEntry({
         contactId: customerId, date, refNo: `${invoiceNo}-PAY`,
         description: `Payment against ${invoiceNo}`,
         debit: 0, credit: Math.round(paidToday * 100) / 100,
@@ -169,7 +158,7 @@ export default function Billing() {
       });
     }
 
-    const savedInvoice = await db.invoices.get(id);
+    const savedInvoice = await getInvoice(id);
     setLastSavedInvoice(savedInvoice || null);
     toast.success(`Invoice ${invoiceNo} saved!`);
   }
@@ -197,7 +186,6 @@ export default function Billing() {
 
       <Card className="shadow-sm">
         <CardContent className="p-4 space-y-4">
-          {/* Date & Due Date */}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <Label className="text-xs">{t('date', lang)}</Label>
@@ -209,7 +197,6 @@ export default function Billing() {
             </div>
           </div>
 
-          {/* Customer Select */}
           <div>
             <Label className="text-xs">{t('selectCustomer', lang)}</Label>
             <Popover open={custOpen} onOpenChange={setCustOpen}>
@@ -237,7 +224,6 @@ export default function Billing() {
             </Popover>
           </div>
 
-          {/* Previous Balance Toggle */}
           {customerId && (
             <div className="flex items-center justify-between gap-3 bg-muted p-3 rounded-lg">
               <div className="flex items-center gap-2 flex-1">
@@ -250,16 +236,14 @@ export default function Billing() {
             </div>
           )}
 
-          {/* Items - Fast Entry */}
           <div className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-sm font-semibold">Items</Label>
-              <Button variant="ghost" size="sm" onClick={addItem} className="h-7 text-xs">
+              <Button variant="ghost" size="sm" onClick={addItemRow} className="h-7 text-xs">
                 <Plus className="h-3 w-3 mr-1" />{t('addItem', lang)}
               </Button>
             </div>
 
-            {/* Column Headers */}
             <div className="grid grid-cols-12 gap-1.5 px-1">
               <span className="col-span-4 text-[10px] font-medium text-muted-foreground">{t('itemName', lang)}</span>
               <span className="col-span-2 text-[10px] font-medium text-muted-foreground text-center">{t('quantity', lang)}</span>
@@ -271,39 +255,16 @@ export default function Billing() {
             {items.map((item, i) => (
               <div key={i} className="grid grid-cols-12 gap-1.5 items-center">
                 <div className="col-span-4">
-                  <Input
-                    ref={el => setRef(`${i}-name`, el)}
-                    value={item.name}
-                    onChange={e => updateItem(i, 'name', e.target.value)}
-                    onKeyDown={e => handleItemKeyDown(e, i, 'name')}
-                    placeholder="Item"
-                    className="h-9 text-sm"
-                  />
+                  <Input ref={el => setRef(`${i}-name`, el)} value={item.name} onChange={e => updateItem(i, 'name', e.target.value)} onKeyDown={e => handleItemKeyDown(e, i, 'name')} placeholder="Item" className="h-9 text-sm" />
                 </div>
                 <div className="col-span-2">
-                  <Input
-                    ref={el => setRef(`${i}-qty`, el)}
-                    type="number" min={1}
-                    value={item.qty}
-                    onChange={e => updateItem(i, 'qty', Number(e.target.value))}
-                    onKeyDown={e => handleItemKeyDown(e, i, 'qty')}
-                    className="h-9 text-sm text-center"
-                  />
+                  <Input ref={el => setRef(`${i}-qty`, el)} type="number" min={1} value={item.qty} onChange={e => updateItem(i, 'qty', Number(e.target.value))} onKeyDown={e => handleItemKeyDown(e, i, 'qty')} className="h-9 text-sm text-center" />
                 </div>
                 <div className="col-span-2">
-                  <Input
-                    ref={el => setRef(`${i}-rate`, el)}
-                    type="number" min={0}
-                    value={item.rate}
-                    onChange={e => updateItem(i, 'rate', Number(e.target.value))}
-                    onKeyDown={e => handleItemKeyDown(e, i, 'rate')}
-                    className="h-9 text-sm text-right"
-                  />
+                  <Input ref={el => setRef(`${i}-rate`, el)} type="number" min={0} value={item.rate} onChange={e => updateItem(i, 'rate', Number(e.target.value))} onKeyDown={e => handleItemKeyDown(e, i, 'rate')} className="h-9 text-sm text-right" />
                 </div>
                 <div className="col-span-3">
-                  <div className="h-9 flex items-center justify-end px-2 bg-muted rounded-md text-sm font-medium">
-                    {formatINR(item.amount)}
-                  </div>
+                  <div className="h-9 flex items-center justify-end px-2 bg-muted rounded-md text-sm font-medium">{formatINR(item.amount)}</div>
                 </div>
                 <div className="col-span-1 flex justify-center">
                   <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => removeItem(i)} disabled={items.length <= 1}>
@@ -314,7 +275,6 @@ export default function Billing() {
             ))}
           </div>
 
-          {/* Calculations */}
           <div className="border-t pt-3 space-y-1.5">
             <div className="flex justify-between text-sm">
               <span className="text-muted-foreground">{t('subtotal', lang)}</span>
@@ -363,15 +323,9 @@ export default function Billing() {
               <span className="text-foreground">{formatINR(finalPayable)}</span>
             </div>
 
-            {/* Paid Today */}
             <div className="flex items-center justify-between gap-3 pt-1">
               <Label className="text-sm font-medium text-credit whitespace-nowrap">{t('paidToday', lang)}</Label>
-              <Input
-                type="number" min={0} max={finalPayable}
-                value={paidToday}
-                onChange={e => setPaidToday(Math.min(Number(e.target.value), finalPayable))}
-                className="w-32 h-9 text-sm text-right"
-              />
+              <Input type="number" min={0} max={finalPayable} value={paidToday} onChange={e => setPaidToday(Math.min(Number(e.target.value), finalPayable))} className="w-32 h-9 text-sm text-right" />
             </div>
 
             <div className="flex justify-between text-sm font-bold text-debit">
@@ -380,9 +334,8 @@ export default function Billing() {
             </div>
           </div>
 
-          {/* Actions */}
           {!lastSavedInvoice ? (
-            <Button className="w-full" onClick={saveInvoice}>
+            <Button className="w-full" onClick={saveInvoiceHandler}>
               <Save className="h-4 w-4 mr-2" />{t('saveInvoice', lang)}
             </Button>
           ) : (

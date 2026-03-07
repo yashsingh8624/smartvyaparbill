@@ -1,6 +1,5 @@
 import { useState } from 'react';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getNextRefNo } from '@/lib/db';
+import { useContacts, useLedgerEntries, addLedgerEntry, getNextRefNo } from '@/hooks/useData';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
 import { formatINR } from '@/lib/utils';
@@ -18,8 +17,8 @@ export default function Collection() {
   const { settings } = useApp();
   const lang = settings.language;
 
-  const customers = useLiveQuery(() => db.contacts.where('type').equals('customer').toArray()) || [];
-  const allEntries = useLiveQuery(() => db.ledgerEntries.toArray()) || [];
+  const customers = useContacts('customer');
+  const allEntries = useLedgerEntries();
 
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [showPayment, setShowPayment] = useState(false);
@@ -43,7 +42,6 @@ export default function Collection() {
 
   const selectedCustomer = customerDues.find(c => c.id === selectedId);
 
-  // Payment history with running balance
   const selectedAllEntries = allEntries
     .filter(e => e.contactId === selectedId)
     .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
@@ -64,7 +62,7 @@ export default function Collection() {
       return;
     }
     const refNo = await getNextRefNo(selectedId, 'COL');
-    await db.ledgerEntries.add({
+    await addLedgerEntry({
       contactId: selectedId,
       date: payDate, refNo,
       description: `Collection - ${payMode}${payNote ? ` (${payNote})` : ''}`,
@@ -117,7 +115,6 @@ export default function Collection() {
         </div>
       )}
 
-      {/* Payment History */}
       {selectedId && paymentHistory.length > 0 && (
         <Card className="shadow-sm">
           <CardContent className="p-4">
@@ -148,7 +145,6 @@ export default function Collection() {
         </Card>
       )}
 
-      {/* Payment Dialog */}
       <Dialog open={showPayment} onOpenChange={setShowPayment}>
         <DialogContent>
           <DialogHeader>

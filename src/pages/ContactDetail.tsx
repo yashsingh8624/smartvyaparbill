@@ -1,7 +1,11 @@
 import { useState } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, getNextRefNo } from '@/lib/db';
+import {
+  useContact, useLedgerEntries, useInvoices,
+  addLedgerEntry, deleteLedgerEntry, updateContact,
+  deleteContact as deleteContactFn, deleteInvoice as deleteInvoiceFn,
+  getNextRefNo,
+} from '@/hooks/useData';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
 import { formatINR } from '@/lib/utils';
@@ -26,15 +30,10 @@ export default function ContactDetail() {
   const contactType = location.pathname.includes('vendor') ? 'vendor' : 'customer';
   const isCustomer = contactType === 'customer';
 
-  const contact = useLiveQuery(() => db.contacts.get(Number(id)), [id]);
-  const entries = useLiveQuery(
-    () => db.ledgerEntries.where('contactId').equals(Number(id)).sortBy('createdAt'),
-    [id]
-  ) || [];
-  const invoices = useLiveQuery(
-    () => db.invoices.where('customerId').equals(Number(id)).toArray(),
-    [id]
-  ) || [];
+  const contact = useContact(Number(id));
+  const entries = useLedgerEntries(Number(id));
+  const invoices = useInvoices(isCustomer ? Number(id) : undefined);
+  const customerInvoices = isCustomer ? invoices : [];
 
   const [showDebit, setShowDebit] = useState(false);
   const [showCredit, setShowCredit] = useState(false);
@@ -74,7 +73,7 @@ export default function ContactDetail() {
     if (dQty <= 0 || dRate <= 0) { toast.error('Quantity and rate must be positive'); return; }
     const prefix = isCustomer ? 'S' : 'P';
     const refNo = await getNextRefNo(contact.id!, prefix);
-    await db.ledgerEntries.add({
+    await addLedgerEntry({
       contactId: contact.id!, date: dDate, refNo, description: dDesc || 'Goods',
       debit: amount, credit: 0, createdAt: new Date().toISOString(),
     });
@@ -86,7 +85,7 @@ export default function ContactDetail() {
     if (cAmount <= 0) { toast.error('Amount must be greater than 0'); return; }
     if (cAmount > balance) { toast.error('Amount exceeds outstanding balance'); return; }
     const refNo = await getNextRefNo(contact.id!, 'PAY');
-    await db.ledgerEntries.add({
+    await addLedgerEntry({
       contactId: contact.id!, date: cDate, refNo,
       description: `Payment - ${cMode}`, debit: 0, credit: Math.round(cAmount * 100) / 100,
       mode: cMode, note: cNote, createdAt: new Date().toISOString(),
@@ -103,30 +102,27 @@ export default function ContactDetail() {
   }
 
   async function saveEdit() {
-    await db.contacts.update(contact.id!, { name: editName, phone: editPhone, address: editAddress });
+    await updateContact(contact.id!, { name: editName, phone: editPhone, address: editAddress });
     toast.success('Contact updated');
     setShowEdit(false);
   }
 
-  async function deleteContact() {
-    await db.ledgerEntries.where('contactId').equals(contact.id!).delete();
-    const invIds = invoices.map(inv => inv.id!);
-    if (invIds.length > 0) await db.invoices.bulkDelete(invIds);
-    await db.contacts.delete(contact.id!);
+  async function handleDeleteContact() {
+    await deleteContactFn(contact.id!);
     toast.success('Contact deleted');
     navigate(-1);
   }
 
-  async function deleteInvoice(invoiceId: number) {
-    const inv = await db.invoices.get(invoiceId);
+  async function handleDeleteInvoice(invoiceId: number) {
+    const inv = customerInvoices.find(i => i.id === invoiceId);
     if (!inv) return;
     const relatedEntries = entries.filter(
       e => e.refNo === inv.invoiceNo || e.refNo === `${inv.invoiceNo}-PAY`
     );
     for (const entry of relatedEntries) {
-      if (entry.id) await db.ledgerEntries.delete(entry.id);
+      if (entry.id) await deleteLedgerEntry(entry.id);
     }
-    await db.invoices.delete(invoiceId);
+    await deleteInvoiceFn(invoiceId);
     toast.success(`Invoice ${inv.invoiceNo} deleted`);
     setShowDeleteInvoice(null);
   }
@@ -151,7 +147,6 @@ export default function ContactDetail() {
         </div>
       </div>
 
-      {/* Summary */}
       <div className="grid grid-cols-2 gap-3">
         <Card className="shadow-sm"><CardContent className="p-3">
           <p className="text-[10px] text-muted-foreground uppercase">{isCustomer ? t('totalGoodsTaken', lang) : t('totalPurchases', lang)}</p>
@@ -170,7 +165,6 @@ export default function ContactDetail() {
         </CardContent></Card>
       </div>
 
-      {/* Actions */}
       <div className="grid grid-cols-2 gap-2">
         <Button variant="debit" size="sm" onClick={() => setShowDebit(true)}>
           <Plus className="h-4 w-4 mr-1" />{isCustomer ? t('addSale', lang) : t('addPurchase', lang)}
@@ -188,8 +182,7 @@ export default function ContactDetail() {
         )}
       </div>
 
-      {/* Invoice History */}
-      {isCustomer && invoices.length > 0 && (
+      {isCustomer && customerInvoices.length > 0 && (
         <Card className="shadow-sm">
           <CardContent className="p-4">
             <h3 className="text-sm font-semibold mb-3 text-card-foreground">{t('invoiceHistory', lang)}</h3>
@@ -205,7 +198,7 @@ export default function ContactDetail() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {invoices.sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(inv => (
+                  {[...customerInvoices].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map(inv => (
                     <TableRow key={inv.id}>
                       <TableCell className="text-xs font-medium">{inv.invoiceNo}</TableCell>
                       <TableCell className="text-xs">{inv.date}</TableCell>
@@ -225,7 +218,6 @@ export default function ContactDetail() {
         </Card>
       )}
 
-      {/* Ledger Table */}
       {entries.length === 0 ? (
         <p className="text-center text-muted-foreground py-6">{t('noEntries', lang)}</p>
       ) : (
@@ -323,7 +315,7 @@ export default function ContactDetail() {
           <p className="text-sm text-muted-foreground">{t('deleteContactConfirm', lang)}</p>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setShowDeleteConfirm(false)}>{t('cancel', lang)}</Button>
-            <Button variant="destructive" onClick={deleteContact}>{t('delete', lang)}</Button>
+            <Button variant="destructive" onClick={handleDeleteContact}>{t('delete', lang)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
@@ -334,7 +326,7 @@ export default function ContactDetail() {
           <p className="text-sm text-muted-foreground">{t('deleteInvoiceConfirm', lang)}</p>
           <DialogFooter className="gap-2">
             <Button variant="outline" onClick={() => setShowDeleteInvoice(null)}>{t('cancel', lang)}</Button>
-            <Button variant="destructive" onClick={() => showDeleteInvoice && deleteInvoice(showDeleteInvoice)}>{t('delete', lang)}</Button>
+            <Button variant="destructive" onClick={() => showDeleteInvoice && handleDeleteInvoice(showDeleteInvoice)}>{t('delete', lang)}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

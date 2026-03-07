@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { useLiveQuery } from 'dexie-react-hooks';
-import { db, type Contact } from '@/lib/db';
+import { useContacts, useLedgerEntries, addContact } from '@/hooks/useData';
+import type { Contact } from '@/lib/db';
 import { useApp } from '@/contexts/AppContext';
 import { t } from '@/lib/i18n';
 import { formatINR } from '@/lib/utils';
@@ -26,12 +26,8 @@ export default function ContactList() {
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
 
-  const contacts = useLiveQuery(
-    () => db.contacts.where('type').equals(contactType).toArray(),
-    [contactType]
-  ) || [];
-
-  const allEntries = useLiveQuery(() => db.ledgerEntries.toArray()) || [];
+  const contacts = useContacts(contactType);
+  const allEntries = useLedgerEntries();
 
   const filtered = contacts.filter(
     c => c.name.toLowerCase().includes(search.toLowerCase()) || c.phone.includes(search)
@@ -46,7 +42,7 @@ export default function ContactList() {
 
   async function handleAdd() {
     if (!name.trim()) return;
-    const id = await db.contacts.add({
+    const id = await addContact({
       name: name.trim(), phone: phone.trim(), address: address.trim(),
       type: contactType, createdAt: new Date().toISOString(),
     });
